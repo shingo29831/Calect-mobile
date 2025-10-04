@@ -73,3 +73,102 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+
+# ── OS / エディタ ───────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# JetBrains (WebStorm / IntelliJ)
+.idea/
+*.ipr
+*.iws
+
+# VS Code
+.vscode/
+
+# ── Node / 一般 ────────────────────────────────────────────────
+node_modules/
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-debug.log*
+*.pid
+*.pid.lock
+*.seed
+coverage/
+.tmp/
+temp/
+tmp/
+
+# 環境変数ファイル（必要に応じて調整）
+.env
+.env.*.local
+.env.local
+
+# マージ衝突など
+*.orig
+
+# ── React Native / Metro / Watchman ────────────────────────────
+.haste/
+metro-cache/
+watchman/
+# watchman 設定ファイルはリポジトリに残すことが多いので除外しない
+# .watchmanconfig
+
+# ── iOS (Xcode) ────────────────────────────────────────────────
+ios/build/
+ios/DerivedData/
+ios/Pods/
+# CocoaPods: Podfile.lock は基本コミット推奨なので除外しない
+
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+*.xcuserstate
+*.moved-aside
+*.xccrashpoint
+
+# ── Android (Gradle) ───────────────────────────────────────────
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/app/debug.keystore
+*.iml
+.gradle/
+# Gradle wrapper はコミット推奨（gradle/wrapper/** 等）
+
+# ── Keystore / 証明書（必要に応じて追加） ──────────────────────
+*.keystore
+*.keystore.properties
+*.jks
+*.p12
+
+# ── Fastlane ───────────────────────────────────────────────────
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# ── Buck ───────────────────────────────────────────────────────
+.buckconfig.local
+buck-out/
+.buckd/
+
+# ── Ruby (Bundler) ────────────────────────────────────────────
+/.bundle/
+vendor/bundle/
+
+# ── その他ビルド物 ────────────────────────────────────────────
+build/
+dist/
