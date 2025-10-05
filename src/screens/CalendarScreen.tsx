@@ -4,7 +4,7 @@ import { View, Text, Pressable } from 'react-native';
 import { CalendarList } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
 import dayjs from '../lib/dayjs';
-import { listInstancesByDate } from '../store/db'; // ← listInstancesInRange を削除
+import { listInstancesByDate } from '../store/db';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation';
 
@@ -16,14 +16,12 @@ import {
   SCREEN_H,
   SCREEN_W,
   HAIR_SAFE,
-  LINE_W,
   LINE_COLOR,
   DAY_FONT,
   HEADER_HEIGHT,
   MONTH_TITLE_HEIGHT,
   ROWS,
   FIRST_DAY,
-  SEP_H,
   PROFILE_ICON_SIZE,
 } from './CalendarParts';
 
@@ -69,6 +67,9 @@ const PROFILE_EMOJI = '🙂';
 const ROW_HEIGHT = 64;
 const PAGE = 50;
 
+// ↓ 追加：曜日ヘッダー直下をさらに詰める（px）
+const TIGHTEN_BELOW_WEEK = 2;
+
 export default function CalendarScreen({ navigation }: Props) {
   const today = dayjs().format('YYYY-MM-DD');
   const [selected, setSelected] = useState<string>(today);
@@ -100,10 +101,10 @@ export default function CalendarScreen({ navigation }: Props) {
 
   const initialCurrent = useRef(dayjs().startOf('month').format('YYYY-MM-DD')).current;
 
-  // セル高さ
+  // セル高さ（仕切りなしで計算）
   const cellH = useMemo(() => {
     if (gridH <= 0) return 0;
-    const usable = gridH - MONTH_TITLE_HEIGHT - HEADER_HEIGHT - SEP_H;
+    const usable = gridH - MONTH_TITLE_HEIGHT - HEADER_HEIGHT;
     const per = Math.max(28, Math.floor(usable / ROWS));
     return Math.floor(per);
   }, [gridH]);
@@ -176,7 +177,7 @@ export default function CalendarScreen({ navigation }: Props) {
   const deferredMonth = useDeferredValue(currentMonth);
   const monthDates = useMemo(() => getMonthRangeDates(deferredMonth), [deferredMonth]);
 
-  // イベント配置（← 新シグネチャ）
+  // イベント配置（新シグネチャ）
   const { eventsByDate, overflowByDate, hideRightDividerDays } = useMonthEvents(
     monthDates,
     filterEventsByEntity,
@@ -306,7 +307,7 @@ export default function CalendarScreen({ navigation }: Props) {
     []
   );
 
-  // ==== DayCell レンダラをメモ化（無駄な再生成を抑制） ====
+  // ==== DayCell レンダラをメモ化 ====
   const renderDay = useCallback(
     ({ date, state, marking, onPress }: any) => {
       const dateStr = date?.dateString as string;
@@ -351,37 +352,38 @@ export default function CalendarScreen({ navigation }: Props) {
           {/* 曜日ヘッダー */}
           {innerW > 0 ? <WeekHeader colWBase={colWBase} colWLast={colWLast} /> : null}
 
-          {/* 仕切り線 */}
-          <View style={{ height: SEP_H, backgroundColor: LINE_COLOR }} />
-
-          {/* CalendarList */}
-          {calReady && (
-            <CalendarList
-              key={`${innerW}x${cellH}`}
-              firstDay={FIRST_DAY}
-              current={initialCurrent}
-              horizontal={false}
-              pagingEnabled
-              hideDayNames
-              renderHeader={() => null}
-              style={{ height: calendarBodyH }}
-              calendarStyle={{ paddingTop: 0, marginTop: -LINE_W }}
-              calendarHeight={calendarBodyH}
-              pastScrollRange={12}
-              futureScrollRange={12}
-              minDate={'1900-01-01'}
-              maxDate={'2100-12-31'}
-              hideExtraDays={false}
-              showSixWeeks
-              onDayPress={handleDayPress}
-              onVisibleMonthsChange={onVisibleMonthsChange}
-              markedDates={marked}
-              showScrollIndicator={false}
-              theme={calendarTheme as any}
-              contentContainerStyle={{ alignItems: 'flex-start', paddingHorizontal: 0, paddingTop: 0 }}
-              dayComponent={renderDay as any}
-            />
-          )}
+          {/* ここでハミ出しをクリップ */}
+          <View style={{ overflow: 'hidden' }}>
+            {calReady && (
+              <CalendarList
+                key={`${innerW}x${cellH}`}
+                firstDay={FIRST_DAY}
+                current={initialCurrent}
+                horizontal={false}
+                pagingEnabled
+                hideDayNames
+                renderHeader={() => null}
+                style={{ height: calendarBodyH }}
+                // ↓ さらに上へ寄せる（HAIR_SAFE + 追い詰め量）
+                calendarStyle={{ paddingTop: 0, marginTop: -(HAIR_SAFE + TIGHTEN_BELOW_WEEK) }}
+                calendarHeight={calendarBodyH}
+                pastScrollRange={12}
+                futureScrollRange={12}
+                minDate={'1900-01-01'}
+                maxDate={'2100-12-31'}
+                hideExtraDays={false}
+                showSixWeeks
+                onDayPress={handleDayPress}
+                onVisibleMonthsChange={onVisibleMonthsChange}
+                markedDates={marked}
+                showScrollIndicator={false}
+                removeClippedSubviews
+                theme={calendarTheme as any}
+                contentContainerStyle={{ alignItems: 'flex-start', paddingHorizontal: 0, paddingTop: 0 }}
+                dayComponent={renderDay as any}
+              />
+            )}
+          </View>
         </View>
       </View>
 
