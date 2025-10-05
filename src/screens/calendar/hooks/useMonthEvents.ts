@@ -4,13 +4,13 @@ import dayjs from '../../../lib/dayjs';
 import type { EventSegment } from '../../CalendarParts';
 import { startOfWeek, FIRST_DAY, MAX_BARS_PER_DAY } from '../../CalendarParts';
 import { fromUTC } from '../../../utils/time';
+import { listInstancesByDates } from '../../../store/db';
 
 type SortMode = 'span' | 'start';
 
 const makeStableKey = (ev: any) => {
   const id = ev.event_id ?? ev.master_event_id ?? ev.series_id ?? ev.parent_id ?? null;
   if (id != null) return `E:${String(id)}`;
-  // ここも UTC → ローカルへ正規化して ISO に（安定キーがTZ差でブレないように）
   const s = fromUTC(ev.start_at).toISOString();
   const e = fromUTC(ev.end_at).toISOString();
   const t = ev.title ?? '';
@@ -19,7 +19,6 @@ const makeStableKey = (ev: any) => {
 
 export function useMonthEvents(
   monthDates: string[],
-  listInstancesInRange: (start: string, end: string) => any[] | undefined,
   filterEventsByEntity: (arr: any[]) => any[],
   sortMode: SortMode
 ) {
@@ -40,19 +39,18 @@ export function useMonthEvents(
       dayEndCache[d] = ds.endOf('day');
     }
 
-    // 月範囲で一括取得（端を日終端まで広げる）
-    const monthStart = monthDates[0];
-    const monthEnd = monthDates[monthDates.length - 1];
-    const allRaw =
-      listInstancesInRange(
-        dayjs(monthStart).startOf('day').toISOString(),
-        dayjs(monthEnd).endOf('day').toISOString()
-      ) ?? [];
+    // === 参照：日別インスタンスを一括取得（内部キャッシュあり）
+    const byDateMap = listInstancesByDates(monthDates);
+    const allRaw: any[] = [];
+    for (const d of monthDates) {
+      const arr = byDateMap[d] ?? [];
+      if (arr.length) allRaw.push(...arr);
+    }
 
     // エンティティでフィルタ
     const allFiltered = filterEventsByEntity(allRaw);
 
-    // レーン計算用に重複除去（安定キー）
+    // 重複除去（安定キー）
     const uniq = new Map<string | number, any>();
     for (const ev of allFiltered) {
       const key = makeStableKey(ev);
@@ -60,7 +58,7 @@ export function useMonthEvents(
     }
     const all = Array.from(uniq.values());
 
-    // 端末TZに正規化して被り日を算出
+    // 端末TZでそのイベントが被る日を算出
     const coveredDatesFor = (ev: any): string[] => {
       const res: string[] = [];
       const s = fromUTC(ev.start_at);
@@ -73,10 +71,7 @@ export function useMonthEvents(
     };
 
     const idxOfDate = monthDates.reduce(
-      (acc: Record<string, number>, d: string, i: number) => {
-        acc[d] = i;
-        return acc;
-      },
+      (acc: Record<string, number>, d: string, i: number) => ((acc[d] = i), acc),
       {} as Record<string, number>
     );
 
@@ -120,9 +115,7 @@ export function useMonthEvents(
         if (!laneDates[lane]) laneDates[lane] = {};
         const used = laneDates[lane];
         if (cov.every((d) => !used[d])) {
-          cov.forEach((d) => {
-            used[d] = true;
-          });
+          cov.forEach((d) => (used[d] = true));
           laneOf[key] = lane;
           break;
         }
@@ -136,14 +129,14 @@ export function useMonthEvents(
 
     for (const d of monthDates) {
       // その日に“少しでも重なる”イベント（DB呼び出しはしない）
+      const sDay = dayStartCache[d];
+      const eDay = dayEndCache[d];
+
       const list = all.filter((ev) => {
         const s = fromUTC(ev.start_at);
         const e = fromUTC(ev.end_at);
-        return s.isBefore(dayEndCache[d]) && e.isAfter(dayStartCache[d]);
+        return s.isBefore(eDay) && e.isAfter(sDay);
       });
-
-      const dayStart = dayStartCache[d];
-      const dayEnd = dayEndCache[d];
 
       const byLane: Record<number, any> = {};
       for (const ev of list) {
@@ -171,14 +164,13 @@ export function useMonthEvents(
               instance_id: ev.instance_id ?? key,
               title: ev.title ?? '(untitled)',
               color: ev.color ?? null,
-              // 0:00 終了も“日を跨ぐ”扱い（重なり判定に準拠）
-              spanLeft: s.isBefore(dayStart),
-              spanRight: e.isAfter(dayEnd),
+              spanLeft: s.isBefore(sDay),
+              spanRight: e.isAfter(eDay),
               showTitle,
               __lane: lane,
               __startMs: fromUTC(ev.start_at).valueOf(),
               __key: key,
-              __startsToday: !s.isBefore(dayStart), // 当日開始なら true
+              __startsToday: !s.isBefore(sDay),
               __spanLen: spanLen,
             };
           }
@@ -194,7 +186,6 @@ export function useMonthEvents(
       }
 
       if (sortMode === 'start') {
-        // 当日開始 → 開始時刻昇順 → キー
         const segs = laneIndices.sort((a, b) => a - b).map((ln) => byLane[ln]);
         segs.sort((A: any, B: any) => {
           if (A.__startsToday !== B.__startsToday) return A.__startsToday ? -1 : 1;
@@ -204,12 +195,10 @@ export function useMonthEvents(
 
         const limit = Math.min(MAX_BARS_PER_DAY, segs.length);
         displayedCount = limit;
-
         for (let i = 0; i < limit; i++) {
           const { __lane, __startMs, __key, __startsToday, __spanLen, ...seg } = segs[i];
           slots.push(seg as EventSegment);
         }
-        // 見栄え用のスペーサー
         while (slots.length < Math.min(MAX_BARS_PER_DAY, Math.max(segs.length, 0))) {
           slots.push({
             instance_id: `__spacer-${d}-fill-${slots.length}`,
@@ -221,7 +210,6 @@ export function useMonthEvents(
           } as any);
         }
       } else {
-        // Span モード：期間長い順→開始早い順→キー
         const lanesTodaySortedByImportance = laneIndices
           .filter((ln) => !!byLane[ln])
           .sort((a, b) => {
@@ -234,8 +222,6 @@ export function useMonthEvents(
 
         const chosen = lanesTodaySortedByImportance.slice(0, MAX_BARS_PER_DAY);
         displayedCount = chosen.length;
-
-        // レーンの視覚的連続性のためレーン番号昇順で描画
         chosen.sort((a, b) => a - b);
 
         for (const lane of chosen) {
@@ -249,5 +235,5 @@ export function useMonthEvents(
     }
 
     return { eventsByDate: result, overflowByDate: overflow, hideRightDividerDays };
-  }, [monthDates, listInstancesInRange, filterEventsByEntity, sortMode]);
+  }, [monthDates, filterEventsByEntity, sortMode]);
 }

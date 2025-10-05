@@ -1,10 +1,10 @@
 // src/screens/CalendarScreen.tsx
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { CalendarList } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
 import dayjs from '../lib/dayjs';
-import { listInstancesInRange, listInstancesByDate } from '../store/db';
+import { listInstancesByDate } from '../store/db'; // ← listInstancesInRange を削除
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation';
 
@@ -37,7 +37,6 @@ import { styles } from './calendar/calendarStyles';
 type Props = NativeStackScreenProps<RootStackParamList, 'Calendar'>;
 type SortMode = 'span' | 'start';
 
-/* ───────── Left Drawer (組織 / グループ / フォロー) ───────── */
 const ORGS: EntityItem[] = [
   { id: 'org_me',   label: 'My Schedule', emoji: '🙂',           kind: 'me'   },
   { id: 'org_fam',  label: 'Family',      emoji: '👨‍👩‍👧‍👦', kind: 'org'  },
@@ -89,7 +88,7 @@ export default function CalendarScreen({ navigation }: Props) {
   const [gridH, setGridH] = useState<number>(0);
   const SHEET_H = Math.floor(SCREEN_H * 0.6);
 
-  // ドロワー（共通フック）
+  // ドロワー
   const left = useAnimatedDrawer(DRAWER_W, 'left');
   const right = useAnimatedDrawer(PROFILE_DRAWER_W, 'right');
 
@@ -101,7 +100,7 @@ export default function CalendarScreen({ navigation }: Props) {
 
   const initialCurrent = useRef(dayjs().startOf('month').format('YYYY-MM-DD')).current;
 
-  // カレンダーセルの高さ計算
+  // セル高さ
   const cellH = useMemo(() => {
     if (gridH <= 0) return 0;
     const usable = gridH - MONTH_TITLE_HEIGHT - HEADER_HEIGHT - SEP_H;
@@ -114,7 +113,7 @@ export default function CalendarScreen({ navigation }: Props) {
     return Math.floor(MONTH_TITLE_HEIGHT + cellH * ROWS);
   }, [cellH]);
 
-  // CalendarList を描画可能にするトグル
+  // CalendarList を描画可能に
   const [calReady, setCalReady] = useState(false);
   useEffect(() => {
     if (innerW > 0 && cellH > 0) {
@@ -126,7 +125,7 @@ export default function CalendarScreen({ navigation }: Props) {
     }
   }, [innerW, cellH]);
 
-  //デバウンス（再作成を避けるため useRef にタイマーを保持）
+  // ==== 月ヘッダ切替：デバウンス + 後始末 ====
   const monthDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onVisibleMonthsChange = useCallback((months: Array<{ year: number; month: number }>) => {
     if (!months?.length) return;
@@ -137,12 +136,20 @@ export default function CalendarScreen({ navigation }: Props) {
       setCurrentMonth((prev) => (prev === key ? prev : key));
     }, 80);
   }, []);
-  
+  useEffect(() => {
+    return () => {
+      if (monthDebounceRef.current) {
+        clearTimeout(monthDebounceRef.current);
+        monthDebounceRef.current = null;
+      }
+    };
+  }, []);
 
-  // 列幅（★ ここだけで定義・以降は再宣言しない）
+  // 列幅
   const colWBase = useMemo(() => (innerW > 0 ? Math.floor(innerW / 7) : 0), [innerW]);
   const colWLast = useMemo(() => (innerW > 0 ? innerW - colWBase * 6 : 0), [innerW, colWBase]);
 
+  // 表示対象のグループ
   const getVisibleGroupIds = useCallback((): string[] => {
     if (selectedEntity.kind === 'group') return [selectedEntity.id];
     if (selectedEntity.kind === 'org' || selectedEntity.kind === 'me') {
@@ -154,7 +161,6 @@ export default function CalendarScreen({ navigation }: Props) {
   const filterEventsByEntity = useCallback((listRaw: any[]) => {
     const visibleGroupIds = getVisibleGroupIds();
     const getGroupId = (ev: any) => ev?.group_id ?? ev?.groupId ?? ev?.owner_group_id ?? null;
-
     return listRaw.filter((ev) => {
       const gid = getGroupId(ev);
       if (!gid) return true;
@@ -166,17 +172,18 @@ export default function CalendarScreen({ navigation }: Props) {
     });
   }, [getVisibleGroupIds, selectedEntity]);
 
-  const monthDates = useMemo(() => getMonthRangeDates(currentMonth), [currentMonth]);
+  // ==== 月データ生成を少し遅延してUIを滑らかに ====
+  const deferredMonth = useDeferredValue(currentMonth);
+  const monthDates = useMemo(() => getMonthRangeDates(deferredMonth), [deferredMonth]);
 
-  // イベント配置（フックへ抽出）
+  // イベント配置（← 新シグネチャ）
   const { eventsByDate, overflowByDate, hideRightDividerDays } = useMonthEvents(
     monthDates,
-    listInstancesInRange,
     filterEventsByEntity,
     sortMode
   );
 
-  // ヘッダー
+  // ヘッダ
   useEffect(() => {
     const showEmoji = selectedEntity.kind === 'group';
     const headerLeft = () => (
@@ -299,6 +306,28 @@ export default function CalendarScreen({ navigation }: Props) {
     []
   );
 
+  // ==== DayCell レンダラをメモ化（無駄な再生成を抑制） ====
+  const renderDay = useCallback(
+    ({ date, state, marking, onPress }: any) => {
+      const dateStr = date?.dateString as string;
+      return (
+        <DayCell
+          date={date}
+          state={state}
+          marking={marking}
+          onPress={onPress}
+          colWBase={colWBase}
+          colWLast={colWLast}
+          cellH={cellH}
+          dayEvents={eventsByDate[dateStr] ?? []}
+          hideRightDivider={hideRightDividerDays.has(dateStr)}
+          moreCount={overflowByDate[dateStr] ?? 0}
+        />
+      );
+    },
+    [colWBase, colWLast, cellH, eventsByDate, hideRightDividerDays, overflowByDate]
+  );
+
   return (
     <View style={styles.container}>
       {/* カレンダー */}
@@ -350,23 +379,7 @@ export default function CalendarScreen({ navigation }: Props) {
               showScrollIndicator={false}
               theme={calendarTheme as any}
               contentContainerStyle={{ alignItems: 'flex-start', paddingHorizontal: 0, paddingTop: 0 }}
-              dayComponent={({ date, state, marking, onPress }: any) => {
-                const dateStr = date?.dateString as string;
-                return (
-                  <DayCell
-                    date={date}
-                    state={state}
-                    marking={marking}
-                    onPress={onPress}
-                    colWBase={colWBase}
-                    colWLast={colWLast}
-                    cellH={cellH}
-                    dayEvents={eventsByDate[dateStr] ?? []}
-                    hideRightDivider={hideRightDividerDays.has(dateStr)}
-                    moreCount={overflowByDate[dateStr] ?? 0}
-                  />
-                );
-              }}
+              dayComponent={renderDay as any}
             />
           )}
         </View>

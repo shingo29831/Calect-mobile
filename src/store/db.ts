@@ -17,24 +17,37 @@ function makeId(len = 26): ULID {
 // メモリ上のインスタンス（UTC保存）
 let instances: EventInstance[] = [...SEED.instances];
 
-/**
- * 指定したローカル日付（YYYY-MM-DD）の1日に“少しでも重なる”インスタンス。
- * （既存互換API。内部では listInstancesInRange を使用）
- */
-export function listInstancesByDate(dateISO: string): EventInstance[] {
-  const dayStart = startOfLocalDay(dateISO); // dayjs(ローカルTZ)
-  const dayEnd   = endOfLocalDay(dateISO);   // dayjs(ローカルTZ)
-  return listInstancesInRange(dayStart.toISOString(), dayEnd.toISOString());
+/* =========================================================
+ * by-date キャッシュ
+ *   - キー: JSON.stringify({ d, calIds })
+ *   - 値: その日の EventInstance[]
+ * =======================================================*/
+const _byDateCache = new Map<string, EventInstance[]>();
+const _ck = (d: string, calendarIds?: string[]) =>
+  JSON.stringify({ d, calIds: calendarIds?.slice().sort() ?? null });
+
+export function clearByDateCache() {
+  _byDateCache.clear();
 }
 
-/**
- * 指定ローカル時刻範囲に“少しでも重なる”インスタンスを一括取得。
- * startISO / endISO は ISO 文字列（ローカル基準の文字列でOK）
- *
- * 比較はローカルTZで統一：
- *  - 範囲:  dayjs(startISO) / dayjs(endISO)  …ローカル扱い
- *  - 予定:  fromUTC(instance.start_at/end_at) …UTC保存→ローカルへ正規化
- */
+/* =========================================================
+ * 既存API：1日分（内部では範囲検索を使用）
+ * =======================================================*/
+export function listInstancesByDate(dateISO: string, calendarIds?: string[]): EventInstance[] {
+  const dayStart = startOfLocalDay(dateISO); // dayjs(ローカルTZ)
+  const dayEnd   = endOfLocalDay(dateISO);   // dayjs(ローカルTZ)
+  const rows = listInstancesInRange(dayStart.toISOString(), dayEnd.toISOString());
+  if (calendarIds?.length) {
+    const set = new Set(calendarIds);
+    return rows.filter(r => set.has(r.calendar_id));
+  }
+  return rows;
+}
+
+/* =========================================================
+ * 既存API：範囲検索（ローカルTZ基準で重なり判定）
+ *   条件: s < rangeEnd && (e > rangeStart || e == rangeStart)
+ * =======================================================*/
 export function listInstancesInRange(startISO: string, endISO: string): EventInstance[] {
   const rangeStart = dayjs(startISO);
   const rangeEnd   = dayjs(endISO);
@@ -42,16 +55,43 @@ export function listInstancesInRange(startISO: string, endISO: string): EventIns
   return instances.filter((i) => {
     const s = fromUTC(i.start_at); // UTC → 端末TZ
     const e = fromUTC(i.end_at);
-    // 半開区間に合わせて “終了が範囲開始と同一” も含める
-    // 条件: s < rangeEnd && (e > rangeStart || e == rangeStart)
     return s.isBefore(rangeEnd) && (e.isAfter(rangeStart) || e.isSame(rangeStart));
   });
 }
 
-/**
- * ローカル作成（既存互換）
- * 入力はローカル基準の時刻文字列を想定し、DB保存はUTCに正規化。
- */
+/* =========================================================
+ * 新API：複数日を by-date 参照（キャッシュ有り）で一括取得
+ *   - UIの useMonthEvents からの “参照” 用
+ * =======================================================*/
+export function listInstancesByDates(
+  dates: string[],
+  calendarIds?: string[]
+): Record<string, EventInstance[]> {
+  const out: Record<string, EventInstance[]> = {};
+  const useFilter = !!(calendarIds && calendarIds.length);
+  const calSet = useFilter ? new Set(calendarIds) : null;
+
+  for (const d of dates) {
+    const key = _ck(d, useFilter ? calendarIds : undefined);
+    let rows = _byDateCache.get(key);
+
+    if (!rows) {
+      // 1日分を通常APIで算出（start/end 境界は内部で考慮）
+      rows = listInstancesByDate(d, useFilter ? calendarIds : undefined) ?? [];
+      _byDateCache.set(key, rows);
+    }
+
+    // 追加のフィルタがあればここで（キーに calIds を入れているので通常不要）
+    out[d] = useFilter ? rows.filter(r => calSet!.has(r.calendar_id)) : rows;
+  }
+
+  return out;
+}
+
+/* =========================================================
+ * 既存API：ローカル作成（保存はUTC化）
+ *   - 追加後に by-date キャッシュをクリアして整合性を保つ
+ * =======================================================*/
 export function createEventLocal(input: {
   title: string;
   start_at: string; // ローカルISO
@@ -81,11 +121,15 @@ export function createEventLocal(input: {
   };
   instances.push(inst);
 
+  // 追加したのでキャッシュ破棄（安全側）
+  clearByDateCache();
+
   return ev;
 }
 
 /* 便利：テスト時にリセットしたい場合は下を使う（必要なら export に変更）
 function _resetInstances(next: EventInstance[]) {
   instances = [...next];
+  clearByDateCache();
 }
 */
