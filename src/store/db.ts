@@ -4,6 +4,9 @@ import type { Event, EventInstance, ULID } from '../api/types';
 import { SEED } from './seeds';
 import { fromUTC, startOfLocalDay, endOfLocalDay, toUTCISO } from '../utils/time';
 
+// ★ 追加：月別シャードローダ（必要月だけロード）
+import { getByDatesWithEnsure } from './monthShard';
+
 // --- 依存なしの簡易 26 桁 Base32 ID ジェネレーター（ULID風の見た目） ---
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 function makeId(len = 26): ULID {
@@ -18,7 +21,7 @@ function makeId(len = 26): ULID {
 let instances: EventInstance[] = [...SEED.instances];
 
 /* =========================================================
- * by-date キャッシュ
+ * by-date キャッシュ（従来同期版のために維持）
  *   - キー: JSON.stringify({ d, calIds })
  *   - 値: その日の EventInstance[]
  * =======================================================*/
@@ -31,7 +34,7 @@ export function clearByDateCache() {
 }
 
 /* =========================================================
- * 既存API：1日分（内部では範囲検索を使用）
+ * 従来API：1日分（内部では範囲検索を使用）※同期版
  * =======================================================*/
 export function listInstancesByDate(dateISO: string, calendarIds?: string[]): EventInstance[] {
   const dayStart = startOfLocalDay(dateISO); // dayjs(ローカルTZ)
@@ -45,7 +48,7 @@ export function listInstancesByDate(dateISO: string, calendarIds?: string[]): Ev
 }
 
 /* =========================================================
- * 既存API：範囲検索（ローカルTZ基準で重なり判定）
+ * 従来API：範囲検索（ローカルTZ基準で重なり判定）※同期版
  *   条件: s < rangeEnd && (e > rangeStart || e == rangeStart)
  * =======================================================*/
 export function listInstancesInRange(startISO: string, endISO: string): EventInstance[] {
@@ -60,8 +63,9 @@ export function listInstancesInRange(startISO: string, endISO: string): EventIns
 }
 
 /* =========================================================
- * 新API：複数日を by-date 参照（キャッシュ有り）で一括取得
- *   - UIの useMonthEvents からの “参照” 用
+ * 従来API：複数日を by-date 参照（キャッシュ有り）※同期版
+ *   - 既存コード互換のために残す
+ *   - ファイルI/Oを伴わない現在メモリにある instances を対象
  * =======================================================*/
 export function listInstancesByDates(
   dates: string[],
@@ -89,8 +93,31 @@ export function listInstancesByDates(
 }
 
 /* =========================================================
+ * 新API：複数日を「必要な月だけファイルからロード」して取得 ※非同期版
+ *   - 画面側でこちらに移行すると、巨大JSONの一括読みを回避できる
+ *   - 呼び出し箇所は await が必要（useMonthEvents 側を async 化）
+ * =======================================================*/
+export async function listInstancesByDatesAsync(
+  dates: string[],
+  calendarIds?: string[]
+): Promise<Record<string, EventInstance[]>> {
+  // ① 表示に必要な月だけを ensure → 月キャッシュから該当日の配列を作成
+  const raw = await getByDatesWithEnsure(dates);
+
+  // ② 既存のカレンダーフィルタはそのまま適用
+  if (calendarIds?.length) {
+    const set = new Set(calendarIds);
+    for (const d of dates) {
+      raw[d] = (raw[d] ?? []).filter(r => set.has(r.calendar_id));
+    }
+  }
+  return raw;
+}
+
+/* =========================================================
  * 既存API：ローカル作成（保存はUTC化）
  *   - 追加後に by-date キャッシュをクリアして整合性を保つ
+ *   - ※ファイル保存は localFile / monthShard 側で必要に応じて行ってください
  * =======================================================*/
 export function createEventLocal(input: {
   title: string;
@@ -125,6 +152,16 @@ export function createEventLocal(input: {
   clearByDateCache();
 
   return ev;
+}
+
+/* =========================================================
+ * 公開API：全置換（同期後にメモリDBを一括差し替え）
+ *   - ローカル/サーバ同期の結果を UI へ即時反映させる用途
+ *   - 差し替え後に by-date キャッシュをクリア
+ * =======================================================*/
+export function replaceAllInstances(next: EventInstance[]) {
+  instances = [...next];
+  clearByDateCache();
 }
 
 /* 便利：テスト時にリセットしたい場合は下を使う（必要なら export に変更）

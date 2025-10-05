@@ -1,9 +1,14 @@
-import React from 'react';
+// src/AppRoot.tsx
+import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import RootNavigator from './navigation';
 import { Platform } from 'react-native';
 
+// 追記: ストア読み込み & 同期
+import { loadLocalStore } from './store/localFile';
+import { replaceAllInstances } from './store/db';
+import { runIncrementalSync, exampleFetchServerDiff } from './store/sync';
 
 const qc = new QueryClient();
 
@@ -15,9 +20,8 @@ if (__DEV__) {
   // エミュレータ/実機に合わせてホストを選択
   const host =
     Platform?.OS === 'android'
-      ? // Androidエミュレータなら 10.0.2.2、実機はPCのLAN IPに差し替え
-        '10.0.2.2'
-      : 'localhost';
+      ? '10.0.2.2' // Androidエミュレータ
+      : 'localhost'; // iOSシミュ/デスクトップ
 
   connectToDevTools({
     host,
@@ -25,14 +29,39 @@ if (__DEV__) {
   });
 }
 
+/** 起動時ブート処理（UIはブロックしない） */
+function Bootstrapper() {
+  useEffect(() => {
+    (async () => {
+      try {
+        // 1) ローカルのスナップショットを先に反映（即座にUIに出す）
+        const local = await loadLocalStore();
+        if (local?.instances?.length) {
+          replaceAllInstances(local.instances);
+        }
 
-export default function AppRoot(){
-return (
-    
-<QueryClientProvider client={qc}>
-<NavigationContainer>
-<RootNavigator />
-</NavigationContainer>
-</QueryClientProvider>
-);
+        // 2) バックグラウンドでサーバ差分同期（本番は exampleFetchServerDiff を差し替え）
+        await runIncrementalSync(exampleFetchServerDiff);
+      } catch (e) {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.warn('[AppRoot] bootstrap failed:', e);
+        }
+      }
+    })();
+  }, []);
+
+  return null; // 画面には何も描画しない
+}
+
+export default function AppRoot() {
+  return (
+    <QueryClientProvider client={qc}>
+      <NavigationContainer>
+        {/* 起動時の非同期セットアップ（UIはそのまま表示） */}
+        <Bootstrapper />
+        <RootNavigator />
+      </NavigationContainer>
+    </QueryClientProvider>
+  );
 }

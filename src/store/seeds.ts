@@ -208,6 +208,99 @@ export const INSTANCES: EventInstance[] = [
 ];
 
 /* =========================================================
+ * Synthetic Load: 前後2年、各週にランダム予定を追加
+ * =======================================================*/
+
+// 生成規模（必要ならここを触って調整）
+const LOAD = {
+  yearsBack: 2,
+  yearsForward: 2,
+  eventsPerWeekMin: 1,
+  eventsPerWeekMax: 3,
+  multiDayChance: 0.15,  // 15% は複数日イベント
+  allDayChance: 0.08,    // 8% は“終日”風（0:00-24:00）
+};
+
+// 再現性のある擬似乱数（固定シード）
+function mulberry32(a: number) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rng = mulberry32(0xC0FFEE);
+const r = () => rng();
+const rInt = (min: number, max: number) => Math.floor(r() * (max - min + 1)) + min;
+const pick = <T,>(arr: T[]) => arr[rInt(0, arr.length - 1)];
+const chance = (p: number) => r() < p;
+
+// 適当なタイトル候補
+const TITLES = [
+  'Sync', 'Standup', 'Focus Block', 'Review', '1:1', 'Planning',
+  'Check-in', 'Brainstorm', 'Ops', 'Maintenance', 'Design Jam',
+  'Errand', 'Family Time', 'Workout', 'Lunch', 'Coffee Chat',
+];
+
+// 分単位の候補（終日でない場合）
+const DURATION_MIN_CHOICES = [30, 45, 60, 75, 90, 120, 150, 180, 240];
+
+// 一意IDの連番開始（既存最大より十分大きく）
+let LOAD_INSTANCE_ID = 1_000_000;
+let LOAD_EVENT_SEQ = 1;
+
+// week 範囲を決定（JST固定）
+const startWeek = djs().startOf('week').subtract(LOAD.yearsBack * 52, 'week');
+const endWeek   = djs().endOf('week').add(LOAD.yearsForward * 52, 'week');
+
+// どのカレンダーに入れるか（全部対象）
+const LOAD_CALS = CALENDARS.map(c => c.calendar_id);
+
+// 週ごとに 1〜3 件程度ランダム生成
+for (let w = startWeek.clone(); w.isBefore(endWeek); w = w.add(1, 'week')) {
+  const n = rInt(LOAD.eventsPerWeekMin, LOAD.eventsPerWeekMax);
+  for (let k = 0; k < n; k++) {
+    const calId = pick(LOAD_CALS);
+    const title = pick(TITLES);
+
+    // ランダム曜日（0=日〜6=土）と開始時刻
+    const dayOffset = rInt(0, 6);
+    const baseDay = w.add(dayOffset, 'day');
+
+    // 終日 or 複数日 or 通常
+    let startAt = baseDay;
+    let endAt = baseDay;
+
+    if (chance(LOAD.allDayChance)) {
+      // 終日風：0:00〜翌0:00
+      startAt = at(baseDay, 0, 0, 0, 0);
+      endAt   = at(baseDay.add(1, 'day'), 0, 0, 0, 0);
+    } else if (chance(LOAD.multiDayChance)) {
+      // 複数日：開始は 9-12 時、終了は +1〜3日 の 18:00
+      const startHour = rInt(9, 12);
+      const spanDays = rInt(1, 3);
+      startAt = at(baseDay, startHour, pick([0, 15, 30, 45]));
+      endAt   = at(baseDay.add(spanDays, 'day'), 18, pick([0, 15, 30, 45]));
+    } else {
+      // 通常：開始 8-20 時、所要 30-240 分
+      const startHour = rInt(8, 20);
+      const startMin  = pick([0, 10, 15, 20, 30, 40, 45, 50]);
+      const durMin    = pick(DURATION_MIN_CHOICES);
+      startAt = at(baseDay, startHour, startMin);
+      endAt   = startAt.add(durMin, 'minute');
+    }
+
+    // イベント/インスタンスID（擬似）
+    const evId = `EVT_LOAD_${String(LOAD_EVENT_SEQ++).padStart(6, '0')}`;
+
+    INSTANCES.push(
+      mkInst(LOAD_INSTANCE_ID++, calId, evId, title, startAt, endAt)
+    );
+  }
+}
+
+/* =========================================================
  * 既存コード互換の SEED（単一カレンダー + まとめたインスタンス）
  * =======================================================*/
 export const SEED: { calendar: Calendar; instances: EventInstance[] } = {

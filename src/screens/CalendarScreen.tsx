@@ -1,6 +1,7 @@
 // src/screens/CalendarScreen.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from 'react';
-import { View, Text, Pressable } from 'react-native';
+import { View, Text, Pressable, Platform } from 'react-native';
+import type { AppStateStatus } from 'react-native';
 import { CalendarList } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
 import dayjs from '../lib/dayjs';
@@ -18,7 +19,6 @@ import {
   HAIR_SAFE,
   LINE_COLOR,
   DAY_FONT,
-  HEADER_HEIGHT,
   MONTH_TITLE_HEIGHT,
   ROWS,
   FIRST_DAY,
@@ -67,9 +67,6 @@ const PROFILE_EMOJI = '🙂';
 const ROW_HEIGHT = 64;
 const PAGE = 50;
 
-// ↓ 追加：曜日ヘッダー直下をさらに詰める（px）
-const TIGHTEN_BELOW_WEEK = 2;
-
 export default function CalendarScreen({ navigation }: Props) {
   const today = dayjs().format('YYYY-MM-DD');
   const [selected, setSelected] = useState<string>(today);
@@ -87,6 +84,7 @@ export default function CalendarScreen({ navigation }: Props) {
 
   const [innerW, setInnerW] = useState<number>(0);
   const [gridH, setGridH] = useState<number>(0);
+  const [weekHeaderH, setWeekHeaderH] = useState<number>(0); // ★ 実測の曜日ヘッダー高さ
   const SHEET_H = Math.floor(SCREEN_H * 0.6);
 
   // ドロワー
@@ -101,17 +99,18 @@ export default function CalendarScreen({ navigation }: Props) {
 
   const initialCurrent = useRef(dayjs().startOf('month').format('YYYY-MM-DD')).current;
 
-  // セル高さ（仕切りなしで計算）
+  // セル高さ：固定値ではなく “曜日以下のレイアウト実測” から算出
   const cellH = useMemo(() => {
-    if (gridH <= 0) return 0;
-    const usable = gridH - MONTH_TITLE_HEIGHT - HEADER_HEIGHT;
+    if (gridH <= 0 || weekHeaderH <= 0) return 0;
+    const usable = gridH - MONTH_TITLE_HEIGHT - weekHeaderH;
     const per = Math.max(28, Math.floor(usable / ROWS));
     return Math.floor(per);
-  }, [gridH]);
+  }, [gridH, weekHeaderH]);
 
+  // CalendarList に渡す高さは “グリッドのみ”
   const calendarBodyH = useMemo(() => {
     if (cellH <= 0) return 0;
-    return Math.floor(MONTH_TITLE_HEIGHT + cellH * ROWS);
+    return Math.floor(cellH * ROWS);
   }, [cellH]);
 
   // CalendarList を描画可能に
@@ -236,7 +235,6 @@ export default function CalendarScreen({ navigation }: Props) {
 
   const marked = useMemo(() => ({ [selected]: { selected: true } }), [selected]);
 
-  // シート開閉＆ページング
   const openSheet = useCallback((dateStr: string) => {
     setSheetDate(dateStr);
     const listRaw = listInstancesByDate(dateStr) ?? [];
@@ -283,6 +281,7 @@ export default function CalendarScreen({ navigation }: Props) {
     });
   }, [sheetDate, filterEventsByEntity]);
 
+  // CalendarList の内部ヘッダーは使わないので高さ 0 にする
   const calendarTheme: any = useMemo(
     () => ({
       textDayFontSize: DAY_FONT,
@@ -302,7 +301,7 @@ export default function CalendarScreen({ navigation }: Props) {
         base: { flex: 0, width: undefined, margin: 0, padding: 0, alignItems: 'stretch', justifyContent: 'flex-start' },
       },
       'stylesheet.calendar-list.main': { calendar: { paddingLeft: 0, paddingRight: 0, paddingTop: 0, marginTop: 0 } },
-      'stylesheet.calendar.header': { header: { marginBottom: 0, paddingVertical: 0, height: MONTH_TITLE_HEIGHT } },
+      'stylesheet.calendar.header': { header: { marginBottom: 0, paddingVertical: 0, height: 0 } }, // ★ 0 に固定
     }),
     []
   );
@@ -329,6 +328,78 @@ export default function CalendarScreen({ navigation }: Props) {
     [colWBase, colWLast, cellH, eventsByDate, hideRightDividerDays, overflowByDate]
   );
 
+  /* =========================
+   * 先読み（任意）：前後2ヶ月を非同期プリフェッチ
+   *   - monthShard.ts がある時だけ動くよう動的 import でガード
+   *   - 同じ月の重複ロードを避けるため visited セットで管理
+   *   - UI優先：InteractionManager 後に実行
+   * =========================*/
+  const visitedMonthsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const run = async () => {
+      const m0 = dayjs(currentMonth + '-01');
+      const months = [-2, -1, 1, 2].map((off) => m0.add(off, 'month').format('YYYY-MM'));
+      const targets = months.filter((m) => !visitedMonthsRef.current.has(m));
+      if (targets.length === 0) return;
+
+      // UIの重い処理が終わってから
+      const { InteractionManager } = require('react-native');
+      await new Promise<void>((resolve) => {
+        InteractionManager.runAfterInteractions(() => resolve());
+      });
+
+      try {
+        // monthShard が存在する場合のみ実行（未導入でも壊さない）
+        type MonthShardModule = {
+          ensureMonthsLoaded?: (months: string[]) => Promise<void>;
+          ensureMonthLoaded?: (month: string) => Promise<void>;
+        };
+        const mod = (await import('../store/monthShard').catch(() => null)) as MonthShardModule | null;
+
+        if (mod?.ensureMonthsLoaded) {
+          await mod.ensureMonthsLoaded(targets);
+        } else if (mod?.ensureMonthLoaded) {
+          await Promise.all(targets.map((m) => mod.ensureMonthLoaded!(m)));
+        } else {
+          // monthShard未導入 → 何もしない
+          return;
+        }
+        targets.forEach((t) => visitedMonthsRef.current.add(t));
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.log('[prefetch] months loaded:', targets.join(', '));
+        }
+      } catch (e) {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.warn('[prefetch] failed:', e);
+        }
+      }
+    };
+    run();
+  }, [currentMonth]);
+
+  // iOS で AppState 復帰時に軽く先読み（体感向上オプション）
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    const { AppState } = require('react-native');
+    let last: AppStateStatus = AppState.currentState;
+    const sub = AppState.addEventListener('change', (s: AppStateStatus) => {
+      if (last.match(/inactive|background/) && s === 'active') {
+        // 復帰時：今の currentMonth の +1 を軽くプリフェッチ
+        const m = dayjs(currentMonth + '-01').add(1, 'month').format('YYYY-MM');
+        if (!visitedMonthsRef.current.has(m)) {
+          import('../store/monthShard')
+            .then((mod) => (mod as { ensureMonthLoaded?: (month: string) => Promise<void> } | null)?.ensureMonthLoaded?.(m))
+            .then(() => visitedMonthsRef.current.add(m))
+            .catch(() => {});
+        }
+      }
+      last = s;
+    });
+    return () => sub.remove();
+  }, [currentMonth]);
+
   return (
     <View style={styles.container}>
       {/* カレンダー */}
@@ -349,14 +420,16 @@ export default function CalendarScreen({ navigation }: Props) {
             </View>
           </View>
 
-          {/* 曜日ヘッダー */}
-          {innerW > 0 ? <WeekHeader colWBase={colWBase} colWLast={colWLast} /> : null}
+          {/* 曜日ヘッダー（実測） */}
+          <View onLayout={(e) => setWeekHeaderH(Math.round(e.nativeEvent.layout.height))}>
+            {innerW > 0 ? <WeekHeader colWBase={colWBase} colWLast={colWLast} /> : null}
+          </View>
 
-          {/* ここでハミ出しをクリップ */}
+          {/* CalendarList（曜日直下にピッタリ合う） */}
           <View style={{ overflow: 'hidden' }}>
-            {calReady && (
+            {calReady && weekHeaderH > 0 && (
               <CalendarList
-                key={`${innerW}x${cellH}`}
+                key={`${innerW}x${cellH}x${weekHeaderH}`}
                 firstDay={FIRST_DAY}
                 current={initialCurrent}
                 horizontal={false}
@@ -364,8 +437,7 @@ export default function CalendarScreen({ navigation }: Props) {
                 hideDayNames
                 renderHeader={() => null}
                 style={{ height: calendarBodyH }}
-                // ↓ さらに上へ寄せる（HAIR_SAFE + 追い詰め量）
-                calendarStyle={{ paddingTop: 0, marginTop: -(HAIR_SAFE + TIGHTEN_BELOW_WEEK) }}
+                calendarStyle={{ paddingTop: 0, marginTop: 0 }} // 余白補正なし
                 calendarHeight={calendarBodyH}
                 pastScrollRange={12}
                 futureScrollRange={12}
