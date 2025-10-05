@@ -4,6 +4,8 @@ import type { Dayjs } from 'dayjs';
 import { toUTCISO, fromUTC, startOfLocalDay, endOfLocalDay } from '../utils/time';
 import type { Calendar, EventInstance } from '../api/types';
 
+const TZ = 'Asia/Tokyo';
+
 /**
  * UIの論理IDとDB風のIDの対応（固定ダミー）
  */
@@ -89,13 +91,13 @@ export const ORG_GROUP_CAL_IDS: Record<string, string[]> = {
  * カレンダー定義
  * =======================================================*/
 export const CALENDARS: Calendar[] = [
-  { calendar_id: IDS.calendars.personal,   name: 'Personal',             color: '#0ea5e9', tz: 'Asia/Tokyo', visibility: 'private' },
-  { calendar_id: IDS.calendars.me_private, name: 'My: Private',          color: '#0ea5e9', tz: 'Asia/Tokyo', visibility: 'private' },
-  { calendar_id: IDS.calendars.fam_all,    name: 'Family: All Members',  color: '#22c55e', tz: 'Asia/Tokyo', visibility: 'org' },
-  { calendar_id: IDS.calendars.fam_parents,name: 'Family: Parents',      color: '#16a34a', tz: 'Asia/Tokyo', visibility: 'org' },
-  { calendar_id: IDS.calendars.team_all,   name: 'Team: All Hands',      color: '#6366f1', tz: 'Asia/Tokyo', visibility: 'org' },
-  { calendar_id: IDS.calendars.team_dev,   name: 'Team: Developers',     color: '#3b82f6', tz: 'Asia/Tokyo', visibility: 'org' },
-  { calendar_id: IDS.calendars.team_des,   name: 'Team: Designers',      color: '#a855f7', tz: 'Asia/Tokyo', visibility: 'org' },
+  { calendar_id: IDS.calendars.personal,   name: 'Personal',             color: '#0ea5e9', tz: TZ, visibility: 'private' },
+  { calendar_id: IDS.calendars.me_private, name: 'My: Private',          color: '#0ea5e9', tz: TZ, visibility: 'private' },
+  { calendar_id: IDS.calendars.fam_all,    name: 'Family: All Members',  color: '#22c55e', tz: TZ, visibility: 'org' },
+  { calendar_id: IDS.calendars.fam_parents,name: 'Family: Parents',      color: '#16a34a', tz: TZ, visibility: 'org' },
+  { calendar_id: IDS.calendars.team_all,   name: 'Team: All Hands',      color: '#6366f1', tz: TZ, visibility: 'org' },
+  { calendar_id: IDS.calendars.team_dev,   name: 'Team: Developers',     color: '#3b82f6', tz: TZ, visibility: 'org' },
+  { calendar_id: IDS.calendars.team_des,   name: 'Team: Designers',      color: '#a855f7', tz: TZ, visibility: 'org' },
 ];
 
 const CAL_COLOR: Record<string, string> = Object.fromEntries(
@@ -103,62 +105,66 @@ const CAL_COLOR: Record<string, string> = Object.fromEntries(
 );
 
 /* =========================================================
- * イベントインスタンス生成：
- *  - 引数は Dayjs/string/number/Date を受け付ける
- *  - 必ず Date に正規化してから toUTCISO()（型エラー回避＆挙動安定）
+ * 日付・時刻ユーティリティ（JST固定で生成）
  * =======================================================*/
 type Dateish = Dayjs | string | number | Date;
 
-function toDate(x: Dateish): Date {
-  // Dayjs なら toDate()、それ以外は dayjs() 経由して Date 化
-  return (dayjs.isDayjs(x) ? x : dayjs(x)).toDate();
-}
+// JST固定で Dayjs を作る
+const djs = (x?: Dateish) => (x == null ? dayjs() : dayjs(x)).tz(TZ);
 
+// JST固定の時刻にそろえる
+const at = (d: Dayjs, h = 0, m = 0, s = 0, ms = 0) =>
+  d.tz(TZ).hour(h).minute(m).second(s).millisecond(ms);
+
+// UTC保存用インスタンス化
 function mkInst(
   instance_id: number,
   calendar_id: string,
   event_id: string,
   title: string,
-  startAt: Dateish,
-  endAt: Dateish,
+  startAt: Dayjs,
+  endAt: Dayjs
 ): EventInstance {
   return {
     instance_id,
     calendar_id,
     event_id,
     title,
-    start_at: toUTCISO(toDate(startAt)),
-    end_at: toUTCISO(toDate(endAt)),
+    start_at: toUTCISO(startAt.tz(TZ).toDate()),
+    end_at: toUTCISO(endAt.tz(TZ).toDate()),
     // @ts-ignore UI用の色（型に無ければUI側で無視）
     color: CAL_COLOR[calendar_id],
   };
 }
 
-// 今日/今月の基準（端末TZ）
-const now = dayjs();
-const today = now.startOf('day');
-const month0 = now.startOf('month');
+// 今日/今月の基準（JST固定）
+const today  = djs().startOf('day');
+const month0 = djs().startOf('month');
 
-// 今月内の日付（端末TZ）
-const d2  = month0.add(2, 'day');
-const d3  = month0.add(3, 'day');
-const d4  = month0.add(4, 'day');
-const d10 = month0.add(10, 'day');
-const d11 = month0.add(11, 'day');
-const d12 = month0.add(12, 'day');
-const d15 = month0.add(15, 'day');
-const d17 = month0.add(17, 'day');
-const d31 = month0.add(31, 'day');
+// ====== “その月の n 日目” を明示指定 ======
+const D = (n: number) => month0.date(n); // 1..31
 
-// 端末TZでの便利時間
-const T_00 = (d: Dayjs) => d.hour(0).minute(0).second(0).millisecond(0);
-const T_09 = (d: Dayjs) => d.hour(9).minute(0).second(0).millisecond(0);
-const T_10 = (d: Dayjs) => d.hour(10).minute(0).second(0).millisecond(0);
-const T_12 = (d: Dayjs) => d.hour(12).minute(0).second(0).millisecond(0);
-const T_18 = (d: Dayjs) => d.hour(18).minute(0).second(0).millisecond(0);
-const T_21 = (d: Dayjs) => d.hour(21).minute(0).second(0).millisecond(0);
-const T_22 = (d: Dayjs) => d.hour(22).minute(0).second(0).millisecond(0);
-const T_23 = (d: Dayjs) => d.hour(23).minute(0).second(0).millisecond(0);
+// 今月の日（読み間違い防止のため 2桁にしておく）
+const d01 = D(1);
+const d02 = D(2);
+const d03 = D(3);
+const d04 = D(4);
+const d10 = D(10);
+const d11 = D(11);
+const d12 = D(12);
+const d15 = D(15);
+const d17 = D(17);
+const d31 = D(31);
+
+// 便利時刻（JST固定）
+const T_00 = (d: Dayjs) => at(d, 0, 0, 0, 0);
+const T_09 = (d: Dayjs) => at(d, 9, 0, 0, 0);
+const T_10 = (d: Dayjs) => at(d,10, 0, 0, 0);
+const T_12 = (d: Dayjs) => at(d,12, 0, 0, 0);
+const T_18 = (d: Dayjs) => at(d,18, 0, 0, 0);
+const T_21 = (d: Dayjs) => at(d,21, 0, 0, 0);
+const T_22 = (d: Dayjs) => at(d,22, 0, 0, 0);
+const T_23 = (d: Dayjs) => at(d,23, 0, 0, 0);
 
 /* =========================================================
  * イベントインスタンス（UTC保存）
@@ -174,31 +180,31 @@ export const INSTANCES: EventInstance[] = [
   mkInst(6, IDS.calendars.team_des,    IDS.events.team_des,    'Demo Event', T_12(d11), T_18(d11)),
 
   // 連結検証
-  mkInst(1001, IDS.calendars.team_all, IDS.events.span_team_all, 'Sprint Planning (3d)', T_10(d2), T_18(d4)),
+  mkInst(1001, IDS.calendars.team_all, IDS.events.span_team_all, 'Sprint Planning (3d)', T_10(d02), T_18(d04)),
   mkInst(1002, IDS.calendars.fam_all,  IDS.events.span_fam_all,  'Family Trip',          T_21(d15), T_21(d17)),
   mkInst(1003, IDS.calendars.me_private, IDS.events.span_me_private, 'Server Maintenance', T_23(today), T_00(today.add(1, 'day')).add(3, 'hour')),
   mkInst(1004, IDS.calendars.team_des, IDS.events.span_team_des, 'Design Jam',           T_00(d12), T_00(d12).add(2, 'day')),
 
-  // 10/3
-  mkInst(2001, IDS.calendars.me_private, IDS.events.oct3_me_morning, 'Morning Focus',     T_09(d3), T_09(d3).add(30, 'minute')),
-  mkInst(2002, IDS.calendars.fam_all,    IDS.events.oct3_fam_overlap,'Family Errand',     T_10(d3), T_12(d3)),
-  mkInst(2003, IDS.calendars.fam_parents,IDS.events.oct3_fam_parents,'Parents Meeting',   T_10(d3).add(60, 'minute'), T_12(d3).add(60, 'minute')),
-  mkInst(2004, IDS.calendars.team_all,   IDS.events.oct3_team_all,   'All Hands Prep',    T_10(d3).add(90, 'minute'), T_12(d3).add(30, 'minute')),
-  mkInst(2005, IDS.calendars.team_dev,   IDS.events.oct3_team_dev,   'Dev Sprint Block',  T_12(d3).add(60, 'minute'), T_18(d3).subtract(2, 'hour')),
-  mkInst(2006, IDS.calendars.team_des,   IDS.events.oct3_team_des_all,'3Design Day',      T_00(d3), T_00(d3).add(1, 'day')),
-  mkInst(2007, IDS.calendars.personal,   IDS.events.oct3_personal_all,'3Personal Day',    T_00(d3), T_00(d3).add(1, 'day')),
-  mkInst(2008, IDS.calendars.me_private, IDS.events.oct3_me_night,    'Late-night Maint.',T_23(d3), T_00(d3.add(1, 'day')).add(2, 'hour')),
+  // その月の 3 日
+  mkInst(2001, IDS.calendars.me_private, IDS.events.oct3_me_morning, 'Morning Focus',     T_09(d03), T_09(d03).add(30, 'minute')),
+  mkInst(2002, IDS.calendars.fam_all,    IDS.events.oct3_fam_overlap,'Family Errand',     T_10(d03), T_12(d03)),
+  mkInst(2003, IDS.calendars.fam_parents,IDS.events.oct3_fam_parents,'Parents Meeting',   T_10(d03).add(60, 'minute'), T_12(d03).add(60, 'minute')),
+  mkInst(2004, IDS.calendars.team_all,   IDS.events.oct3_team_all,   'All Hands Prep',    T_10(d03).add(90, 'minute'), T_12(d03).add(30, 'minute')),
+  mkInst(2005, IDS.calendars.team_dev,   IDS.events.oct3_team_dev,   'Dev Sprint Block',  T_12(d03).add(60, 'minute'), T_18(d03).subtract(2, 'hour')),
+  mkInst(2006, IDS.calendars.team_des,   IDS.events.oct3_team_des_all,'3Design Day',      T_00(d03), T_00(d03).add(1, 'day')),
+  mkInst(2007, IDS.calendars.personal,   IDS.events.oct3_personal_all,'3Personal Day',    T_00(d03), T_00(d03).add(1, 'day')),
+  mkInst(2008, IDS.calendars.me_private, IDS.events.oct3_me_night,    'Late-night Maint.',T_23(d03), T_00(d03.add(1, 'day')).add(2, 'hour')),
 
-  // 10/2
-  mkInst(2101, IDS.calendars.me_private, IDS.events.oct2_me_morning,  'Morning Review',   T_09(d2), T_09(d2).add(45, 'minute')),
-  mkInst(2102, IDS.calendars.fam_all,    IDS.events.oct2_fam_overlap, 'Family Chores',    T_10(d2).add(30, 'minute'), T_12(d2)),
-  mkInst(2103, IDS.calendars.fam_parents,IDS.events.oct2_fam_parents, 'Parents Call',     T_10(d2).add(60, 'minute'), T_12(d2).add(60, 'minute')),
-  mkInst(2104, IDS.calendars.team_all,   IDS.events.oct2_team_all,    'Town Hall Brief',  T_12(d2).add(120, 'minute'), T_12(d2).add(180, 'minute')),
-  mkInst(2105, IDS.calendars.team_dev,   IDS.events.oct2_team_dev,    'Dev Focus Block',  T_12(d2).add(180, 'minute'), T_18(d2)),
-  mkInst(2106, IDS.calendars.team_des,   IDS.events.oct2_team_des_all,'2Design Day',      T_00(d2), T_00(d2).add(1, 'day')),
-  mkInst(2107, IDS.calendars.personal,   IDS.events.oct2_personal_all,'2Personal Day',    T_00(d2), T_00(d2).add(1, 'day')),
-  mkInst(2108, IDS.calendars.me_private, IDS.events.oct2_me_night,    'Late-night Ops',   T_22(d2).add(30, 'minute'), T_00(d2.add(1, 'day')).add(90, 'minute')),
-  mkInst(2109, IDS.calendars.me_private, IDS.events.oct2_personal_all,'31personal',       T_22(d31).add(30, 'minute'), T_00(d31.add(1, 'day')).add(90, 'minute')),
+  // その月の 2 日
+  mkInst(2101, IDS.calendars.me_private, IDS.events.oct2_me_morning,  'Morning Review',   T_09(d02), T_09(d02).add(45, 'minute')),
+  mkInst(2102, IDS.calendars.fam_all,    IDS.events.oct2_fam_overlap, 'Family Chores',    T_10(d02).add(30, 'minute'), T_12(d02)),
+  mkInst(2103, IDS.calendars.fam_parents,IDS.events.oct2_fam_parents, 'Parents Call',     T_10(d02).add(60, 'minute'), T_12(d02).add(60, 'minute')),
+  mkInst(2104, IDS.calendars.team_all,   IDS.events.oct2_team_all,    'Town Hall Brief',  T_12(d02).add(120, 'minute'), T_12(d02).add(180, 'minute')),
+  mkInst(2105, IDS.calendars.team_dev,   IDS.events.oct2_team_dev,    'Dev Focus Block',  T_12(d02).add(180, 'minute'), T_18(d02)),
+  mkInst(2106, IDS.calendars.team_des,   IDS.events.oct2_team_des_all,'2Design Day',      T_00(d02), T_00(d02).add(1, 'day')),
+  mkInst(2107, IDS.calendars.personal,   IDS.events.oct2_personal_all,'2Personal Day',    T_00(d02), T_00(d02).add(1, 'day')),
+  mkInst(2108, IDS.calendars.me_private, IDS.events.oct2_me_night,    'Late-night Ops',   T_22(d02).add(30, 'minute'), T_00(d02.add(1, 'day')).add(90, 'minute')),
+  mkInst(2109, IDS.calendars.personal,   IDS.events.oct31_personal_all,'31personal',      T_22(d31).add(30, 'minute'), T_00(d31.add(1, 'day')).add(90, 'minute')),
 ];
 
 /* =========================================================

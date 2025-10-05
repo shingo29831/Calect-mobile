@@ -4,7 +4,7 @@ import { View, Text, Pressable } from 'react-native';
 import { CalendarList } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
 import dayjs from '../lib/dayjs';
-import { listInstancesByDate } from '../store/db';
+import { listInstancesInRange, listInstancesByDate } from '../store/db';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation';
 
@@ -126,12 +126,18 @@ export default function CalendarScreen({ navigation }: Props) {
     }
   }, [innerW, cellH]);
 
+  //デバウンス（再作成を避けるため useRef にタイマーを保持）
+  const monthDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onVisibleMonthsChange = useCallback((months: Array<{ year: number; month: number }>) => {
     if (!months?.length) return;
     const m = months[0];
     const key = `${m.year}-${String(m.month).padStart(2, '0')}`;
-    setCurrentMonth((prev) => (prev === key ? prev : key));
+    if (monthDebounceRef.current) clearTimeout(monthDebounceRef.current);
+    monthDebounceRef.current = setTimeout(() => {
+      setCurrentMonth((prev) => (prev === key ? prev : key));
+    }, 80);
   }, []);
+  
 
   // 列幅（★ ここだけで定義・以降は再宣言しない）
   const colWBase = useMemo(() => (innerW > 0 ? Math.floor(innerW / 7) : 0), [innerW]);
@@ -165,7 +171,7 @@ export default function CalendarScreen({ navigation }: Props) {
   // イベント配置（フックへ抽出）
   const { eventsByDate, overflowByDate, hideRightDividerDays } = useMonthEvents(
     monthDates,
-    listInstancesByDate,
+    listInstancesInRange,
     filterEventsByEntity,
     sortMode
   );
@@ -332,8 +338,8 @@ export default function CalendarScreen({ navigation }: Props) {
               style={{ height: calendarBodyH }}
               calendarStyle={{ paddingTop: 0, marginTop: -LINE_W }}
               calendarHeight={calendarBodyH}
-              pastScrollRange={120}
-              futureScrollRange={120}
+              pastScrollRange={12}
+              futureScrollRange={12}
               minDate={'1900-01-01'}
               maxDate={'2100-12-31'}
               hideExtraDays={false}
