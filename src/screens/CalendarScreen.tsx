@@ -18,7 +18,6 @@ import {
   SCREEN_H,
   SCREEN_W,
   HAIR_SAFE,
-  LINE_COLOR,
   DAY_FONT,
   MONTH_TITLE_HEIGHT,
   ROWS,
@@ -33,7 +32,7 @@ import { useAnimatedDrawer } from './calendar/hooks/useAnimatedDrawer';
 import { useMonthEvents } from './calendar/hooks/useMonthEvents';
 import { styles } from './calendar/calendarStyles';
 
-// ★ 追加：ローカル保存ユーティリティと時間ユーティリティ
+// ローカル保存＆時間ユーティリティ
 import { loadLocalEvents, saveLocalEvent } from '../store/localEvents';
 import { fromUTC, startOfLocalDay, endOfLocalDay } from '../utils/time';
 import { CALENDARS } from '../store/seeds';
@@ -73,6 +72,30 @@ const PROFILE_EMOJI = '🙂';
 const ROW_HEIGHT = 64;
 const PAGE = 50;
 
+// 小さな状態バッジ
+function StatusBadge({ text }: { text: string }) {
+  return (
+    <View style={{
+      position: 'absolute', right: 12, top: 8,
+      backgroundColor: '#0f172a', paddingHorizontal: 10, paddingVertical: 6,
+      borderRadius: 9999, borderWidth: HAIR_SAFE, borderColor: '#0b1222',
+      shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
+      elevation: 4,
+      zIndex: 10,
+    }}>
+      <Text style={{ color: 'white', fontSize: 12, fontWeight: '700' }}>{text}</Text>
+    </View>
+  );
+}
+
+// EventInstance -> DayCell で必要な形（EventSegment風）へ変換
+type EventSegmentMinimal = EventInstance & { spanLeft: boolean; spanRight: boolean };
+const toLocalSegment = (ev: EventInstance): EventSegmentMinimal => ({
+  ...ev,
+  spanLeft: false,
+  spanRight: false,
+});
+
 export default function CalendarScreen({ navigation }: Props) {
   const today = dayjs().format('YYYY-MM-DD');
   const [selected, setSelected] = useState<string>(today);
@@ -93,6 +116,10 @@ export default function CalendarScreen({ navigation }: Props) {
   const [weekHeaderH, setWeekHeaderH] = useState<number>(0);
   const SHEET_H = Math.floor(SCREEN_H * 0.6);
 
+  // 段階ロード状態
+  const [localLoaded, setLocalLoaded] = useState(false);
+  const [dbReady, setDbReady] = useState(false);
+
   // ドロワー
   const left = useAnimatedDrawer(DRAWER_W, 'left');
   const right = useAnimatedDrawer(PROFILE_DRAWER_W, 'right');
@@ -108,7 +135,7 @@ export default function CalendarScreen({ navigation }: Props) {
   const ADD_SHEET_H = Math.floor(SCREEN_H * 0.65);
   const addSheetY = useRef(new Animated.Value(ADD_SHEET_H)).current;
 
-  // ★ ヘルプ（使い方・テスト投入）ボトムシート
+  // 使い方 / テスト投入
   const [helpVisible, setHelpVisible] = useState(false);
   const HELP_SHEET_H = Math.floor(SCREEN_H * 0.62);
   const helpSheetY = useRef(new Animated.Value(HELP_SHEET_H)).current;
@@ -118,7 +145,7 @@ export default function CalendarScreen({ navigation }: Props) {
   const [formStart, setFormStart] = useState<string>(dayjs().format('YYYY-MM-DD HH:mm'));
   const [formEnd, setFormEnd] = useState<string>(dayjs().add(1, 'hour').format('YYYY-MM-DD HH:mm'));
 
-  // 初期カレンダー選択は安全に決定
+  // 初期カレンダー選択を安全に決定
   const [formCalId, setFormCalId] = useState<string>(() => {
     const list = Array.isArray(CALENDARS) ? CALENDARS : [];
     return (
@@ -129,7 +156,7 @@ export default function CalendarScreen({ navigation }: Props) {
   });
 
   // ローカルイベント（日付別）
-  const [localByDate, setLocalByDate] = useState<Record<string, any[]>>({});
+  const [localByDate, setLocalByDate] = useState<Record<string, EventInstance[]>>({});
 
   const initialCurrent = useRef(dayjs().startOf('month').format('YYYY-MM-DD')).current;
 
@@ -147,16 +174,10 @@ export default function CalendarScreen({ navigation }: Props) {
     return Math.floor(cellH * ROWS);
   }, [cellH]);
 
-  // CalendarList を描画可能に
+  // CalendarList を描画可能に（初回ペイントを待たない）
   const [calReady, setCalReady] = useState(false);
   useEffect(() => {
-    if (innerW > 0 && cellH > 0) {
-      const { InteractionManager } = require('react-native');
-      const task = InteractionManager.runAfterInteractions(() => setCalReady(true));
-      return () => task.cancel();
-    } else {
-      setCalReady(false);
-    }
+    setCalReady(innerW > 0 && cellH > 0);
   }, [innerW, cellH]);
 
   // ==== 月ヘッダ切替：デバウンス ====
@@ -206,44 +227,94 @@ export default function CalendarScreen({ navigation }: Props) {
     });
   }, [getVisibleGroupIds, selectedEntity]);
 
-  // ==== 月データ生成を少し遅延 ====
+  // ==== 月データ（DB側）は dbReady になるまで止める ====
   const deferredMonth = useDeferredValue(currentMonth);
   const monthDates = useMemo(() => getMonthRangeDates(deferredMonth), [deferredMonth]);
-
-  // イベント配置（新シグネチャ）
+  const enabledMonthDates = dbReady ? monthDates : [];
   const { eventsByDate, overflowByDate, hideRightDividerDays } = useMonthEvents(
-    monthDates,
+    enabledMonthDates,
     filterEventsByEntity,
     sortMode
   );
 
-  // ★ その月のローカルイベントを読み込み
+  // 1) 画面描画 → 2) ローカル読み込み（イベント期間だけをループ＝線形化）
   useEffect(() => {
+    let cancelled = false;
     const run = async () => {
-      const list = await loadLocalEvents(); // all local
-      const map: Record<string, any[]> = {};
-      const rangeDates = monthDates;
-      const dayStartEndCache = new Map<string, { s: any; e: any }>();
-      for (const d of rangeDates) {
-        const ds = startOfLocalDay(d);
-        const de = endOfLocalDay(d);
-        dayStartEndCache.set(d, { s: ds, e: de });
-      }
+      if (!calReady) return;
+      await new Promise<void>((r) => requestAnimationFrame(() => r()));
+
+      const list = await loadLocalEvents();
+
+      // 当月の先頭/末尾（ローカル日付）
+      if (monthDates.length === 0) return;
+      const monthStart = startOfLocalDay(monthDates[0]);
+      const monthEnd   = endOfLocalDay(monthDates[monthDates.length - 1]);
+
+      const map: Record<string, EventInstance[]> = {};
+
       for (const ev of list) {
-        for (const d of rangeDates) {
-          const { s: ds, e: de } = dayStartEndCache.get(d)!;
-          const s = fromUTC(ev.start_at);
-          const e = fromUTC(ev.end_at);
-          const overlap = s.isBefore(de) && (e.isAfter(ds) || e.isSame(ds));
-          if (overlap) {
-            (map[d] ||= []).push(ev);
-          }
+        const s = fromUTC(ev.start_at);
+        const e = fromUTC(ev.end_at);
+
+        // この月にかかる区間にクリップ
+        const clipStart = s.isAfter(monthStart) ? s : monthStart;
+        const clipEnd   = e.isBefore(monthEnd) ? e : monthEnd;
+        if (clipEnd.isBefore(clipStart)) continue;
+
+        // その期間の日付だけを回す（最大でも実在する日数分）
+        let d = clipStart.startOf('day');
+        const endDay = clipEnd.startOf('day');
+        while (d.isBefore(endDay) || d.isSame(endDay)) {
+          const key = d.format('YYYY-MM-DD');
+          (map[key] ||= []).push(ev);
+          d = d.add(1, 'day');
         }
       }
-      setLocalByDate(map);
+
+      if (!cancelled) {
+        setLocalByDate(map);
+        setLocalLoaded(true);
+      }
     };
     run();
-  }, [deferredMonth, monthDates]);
+    return () => { cancelled = true; setLocalLoaded(false); };
+  }, [calReady, deferredMonth, monthDates]);
+
+  // 3) ローカル読み込み完了 → DB同期（当月＋前後月）
+  useEffect(() => {
+    if (!localLoaded) return;
+    let alive = true;
+    (async () => {
+      try {
+        type MonthShardModule = {
+          ensureMonthLoaded?: (month: string) => Promise<void>;
+          ensureMonthsLoaded?: (months: string[]) => Promise<void>;
+        };
+        const mod = (await import('../store/monthShard').catch(() => null)) as MonthShardModule | null;
+
+        const center = dayjs(currentMonth + '-01');
+        const months = [
+          center.subtract(1, 'month').format('YYYY-MM'),
+          center.format('YYYY-MM'),
+          center.add(1, 'month').format('YYYY-MM'),
+        ];
+
+        // ローカル描画が見えた直後に少し間を置いてから同期開始（体感改善）
+        await new Promise<void>(r => setTimeout(() => r(), 120));
+
+        if (mod?.ensureMonthsLoaded) {
+          await mod.ensureMonthsLoaded(months);
+        } else if (mod?.ensureMonthLoaded) {
+          await Promise.all(months.map(m => mod.ensureMonthLoaded!(m)));
+        }
+        if (alive) setDbReady(true);
+      } catch {
+        if (alive) setDbReady(true); // 失敗してもUIは進める
+      }
+    })();
+    return () => { alive = false; setDbReady(false); };
+  }, [localLoaded, currentMonth]);
 
   // ヘッダ
   useEffect(() => {
@@ -297,11 +368,15 @@ export default function CalendarScreen({ navigation }: Props) {
 
   const marked = useMemo(() => ({ [selected]: { selected: true } }), [selected]);
 
+  // 日別シート：DB準備できていない間はローカルのみで表示
   const openSheet = useCallback((dateStr: string) => {
     setSheetDate(dateStr);
-    const listRaw = listInstancesByDate(dateStr) ?? [];
-    const list = filterEventsByEntity(listRaw);
-    setSheetItems(list.slice(0, PAGE));
+    const dbList = dbReady ? (listInstancesByDate(dateStr) ?? []) : [];
+    const merged = [
+      ...(localByDate[dateStr] ?? []),
+      ...filterEventsByEntity(dbList),
+    ];
+    setSheetItems(merged.slice(0, PAGE));
     setSheetVisible(true);
 
     requestAnimationFrame(() => {
@@ -313,16 +388,13 @@ export default function CalendarScreen({ navigation }: Props) {
         useNativeDriver: true,
       }).start();
     });
-  }, [filterEventsByEntity, sheetY]);
+  }, [filterEventsByEntity, sheetY, SHEET_H, localByDate, dbReady]);
 
   const closeSheet = useCallback(() => {
     sheetY.stopAnimation();
-    Animated.timing(sheetY, {
-      toValue: SHEET_H,
-      duration: 220,
-      useNativeDriver: true,
-    }).start(() => setSheetVisible(false));
-  }, [sheetY]);
+    Animated.timing(sheetY, { toValue: SHEET_H, duration: 220, useNativeDriver: true })
+      .start(() => setSheetVisible(false));
+  }, [sheetY, SHEET_H]);
 
   const handleDayPress = useCallback((d: DateData) => {
     setSelected(d.dateString);
@@ -331,13 +403,16 @@ export default function CalendarScreen({ navigation }: Props) {
 
   const onEndReached = useCallback(() => {
     setSheetItems((prev) => {
-      const allRaw = listInstancesByDate(sheetDate) ?? [];
-      const all = filterEventsByEntity(allRaw);
+      const dbList = dbReady ? (listInstancesByDate(sheetDate) ?? []) : [];
+      const all = [
+        ...(localByDate[sheetDate] ?? []),
+        ...filterEventsByEntity(dbList),
+      ];
       if (prev.length >= all.length) return prev;
       const nextLen = Math.min(prev.length + PAGE, all.length);
       return all.slice(0, nextLen);
     });
-  }, [sheetDate, filterEventsByEntity]);
+  }, [sheetDate, filterEventsByEntity, localByDate, dbReady]);
 
   // CalendarList の内部ヘッダーは使わないので高さ 0 にする
   const calendarTheme: any = useMemo(
@@ -364,15 +439,25 @@ export default function CalendarScreen({ navigation }: Props) {
     []
   );
 
-  // ==== DayCell レンダラをメモ化（ローカル分を合流） ====
+  // DayCell レンダラ（DBは dbReady の時だけ合流）
   const renderDay = useCallback(
     ({ date, state, marking, onPress }: any) => {
       const dateStr = date?.dateString as string;
+
+      // DB側（EventSegment[]）
+      const dbSegs = dbReady ? (eventsByDate[dateStr] ?? []) : [];
+
+      // ローカル側（EventInstance[] -> EventSegment風に変換）
+      const localSegs = (localByDate[dateStr] ?? []).map(toLocalSegment);
+
       const merged = [
-        ...(eventsByDate[dateStr] ?? []),
-        ...(localByDate[dateStr] ?? []),
-      ];
-      const moreLocal = Math.max(0, (localByDate[dateStr]?.length ?? 0));
+        ...dbSegs,
+        ...localSegs,
+      ] as any[]; // DayCell 側の型に合わせる（spanLeft/spanRight は付与済み）
+
+      const moreLocal = localSegs.length;
+      const moreDb    = dbReady ? (overflowByDate[dateStr] ?? 0) : 0;
+
       return (
         <DayCell
           date={date}
@@ -384,11 +469,11 @@ export default function CalendarScreen({ navigation }: Props) {
           cellH={cellH}
           dayEvents={merged}
           hideRightDivider={hideRightDividerDays.has(dateStr)}
-          moreCount={(overflowByDate[dateStr] ?? 0) + moreLocal}
+          moreCount={moreDb + moreLocal}
         />
       );
     },
-    [colWBase, colWLast, cellH, eventsByDate, hideRightDividerDays, overflowByDate, localByDate]
+    [colWBase, colWLast, cellH, eventsByDate, hideRightDividerDays, overflowByDate, localByDate, dbReady]
   );
 
   /* =========================
@@ -396,6 +481,7 @@ export default function CalendarScreen({ navigation }: Props) {
    * =========================*/
   const visitedMonthsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
+    if (!dbReady) return; // DB準備前は先読みを止めて同時IOを避ける
     const run = async () => {
       const m0 = dayjs(currentMonth + '-01');
       const months = [-2, -1, 1, 2].map((off) => m0.add(off, 'month').format('YYYY-MM'));
@@ -428,9 +514,9 @@ export default function CalendarScreen({ navigation }: Props) {
       }
     };
     run();
-  }, [currentMonth]);
+  }, [currentMonth, dbReady]);
 
-  // iOS で AppState 復帰時に軽く先読み
+  // iOS 復帰時の軽い先読み
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
     const { AppState } = require('react-native');
@@ -450,7 +536,7 @@ export default function CalendarScreen({ navigation }: Props) {
     return () => sub.remove();
   }, [currentMonth]);
 
-  // ========== ヘルプ / テスト投入 ==========
+  // 使い方 / テスト投入
   const openHelp = useCallback(() => {
     setHelpVisible(true);
     requestAnimationFrame(() => {
@@ -458,18 +544,16 @@ export default function CalendarScreen({ navigation }: Props) {
       helpSheetY.setValue(HELP_SHEET_H);
       Animated.timing(helpSheetY, { toValue: 0, duration: 260, useNativeDriver: true }).start();
     });
-  }, [helpSheetY]);
+  }, [helpSheetY, HELP_SHEET_H]);
 
   const closeHelp = useCallback(() => {
     helpSheetY.stopAnimation();
     Animated.timing(helpSheetY, { toValue: HELP_SHEET_H, duration: 220, useNativeDriver: true })
       .start(() => setHelpVisible(false));
-  }, [helpSheetY]);
+  }, [helpSheetY, HELP_SHEET_H]);
 
-    const injectTestEventsForThisMonth = useCallback(async () => {
-    // 現在表示中の月のいくつかの日にイベントを投入
+  const injectTestEventsForThisMonth = useCallback(async () => {
     const monthStart = dayjs(currentMonth + '-01');
-
     const samples: Array<{ day: number; title: string; start: string; end: string }> = [
       { day: 3,  title: 'Test: Standup',    start: '10:00', end: '10:30' },
       { day: 7,  title: 'Test: 1on1',       start: '14:00', end: '14:30' },
@@ -477,49 +561,38 @@ export default function CalendarScreen({ navigation }: Props) {
       { day: 18, title: 'Test: Family',     start: '18:00', end: '19:00' },
       { day: 25, title: 'Test: Focus',      start: '09:00', end: '11:00' },
     ];
-
     const cal = (Array.isArray(CALENDARS) ? CALENDARS : []).find(c => c?.calendar_id === formCalId);
     const color = cal?.color ?? undefined;
 
     const created: Array<{ inst: EventInstance; dStr: string }> = [];
-
     for (const smp of samples) {
       const d = monthStart.date(smp.day);
       const startLocalISO = d.format(`YYYY-MM-DD ${smp.start}`);
       const endLocalISO   = d.format(`YYYY-MM-DD ${smp.end}`);
-      const inst = await saveLocalEvent({
-        calendar_id: formCalId,
-        title: smp.title,
-        startLocalISO,
-        endLocalISO,
-        color,
-      });
+      const inst = await saveLocalEvent({ calendar_id: formCalId, title: smp.title, startLocalISO, endLocalISO, color });
       created.push({ inst, dStr: d.format('YYYY-MM-DD') });
     }
 
-    // カレンダー即時反映（DayCell）
     setLocalByDate(prev => {
       const next = { ...prev };
-      for (const { inst, dStr } of created) {
-        (next[dStr] ||= []).push(inst);
-      }
+      for (const { inst, dStr } of created) (next[dStr] ||= []).push(inst);
       return next;
     });
 
-    // もしシートを開いている日と一致すればリストにも反映
     if (sheetVisible) {
       const addedForSheet = created.filter(x => x.dStr === sheetDate).map(x => x.inst);
-      if (addedForSheet.length > 0) {
-        setSheetItems(prev => [...addedForSheet, ...prev]);
-      }
+      if (addedForSheet.length > 0) setSheetItems(prev => [...addedForSheet, ...prev]);
     }
 
     closeHelp();
   }, [currentMonth, formCalId, sheetDate, sheetVisible, closeHelp]);
 
-
   return (
     <View style={styles.container}>
+      {/* ステータスバッジ（段階進行を表示） */}
+      {!localLoaded && <StatusBadge text="Loading local events…" />}
+      {localLoaded && !dbReady && <StatusBadge text="Syncing with server…" />}
+
       {/* カレンダー */}
       <View style={styles.gridBlock} onLayout={(e) => setGridH(e.nativeEvent.layout.height)}>
         <View style={styles.gridInner} onLayout={(e) => setInnerW(e.nativeEvent.layout.width)}>
@@ -538,7 +611,7 @@ export default function CalendarScreen({ navigation }: Props) {
             </View>
           </View>
 
-          {/* 曜日ヘッダー（実測） */}
+          {/* 曜日ヘッダー */}
           <View onLayout={(e) => setWeekHeaderH(Math.round(e.nativeEvent.layout.height))}>
             {innerW > 0 ? <WeekHeader colWBase={colWBase} colWLast={colWLast} /> : null}
           </View>
@@ -601,7 +674,7 @@ export default function CalendarScreen({ navigation }: Props) {
         emoji={PROFILE_EMOJI}
       />
 
-      {/* 既存：日別イベント一覧のボトムシート */}
+      {/* 日別イベントシート */}
       <DayEventsSheet
         visible={sheetVisible}
         sheetY={sheetY}
@@ -617,7 +690,6 @@ export default function CalendarScreen({ navigation }: Props) {
       <Pressable
         onPress={() => {
           setFormTitle('');
-          // 選択日の 10:00-11:00 を初期値
           setFormStart(dayjs(selected).hour(10).minute(0).format('YYYY-MM-DD HH:mm'));
           setFormEnd(dayjs(selected).hour(11).minute(0).format('YYYY-MM-DD HH:mm'));
           const list = Array.isArray(CALENDARS) ? CALENDARS : [];
@@ -629,11 +701,7 @@ export default function CalendarScreen({ navigation }: Props) {
           requestAnimationFrame(() => {
             addSheetY.stopAnimation();
             addSheetY.setValue(ADD_SHEET_H);
-            Animated.timing(addSheetY, {
-              toValue: 0,
-              duration: 260,
-              useNativeDriver: true,
-            }).start();
+            Animated.timing(addSheetY, { toValue: 0, duration: 260, useNativeDriver: true }).start();
           });
         }}
         hitSlop={10}
@@ -690,16 +758,10 @@ export default function CalendarScreen({ navigation }: Props) {
         <Pressable
           onPress={() => {
             addSheetY.stopAnimation();
-            Animated.timing(addSheetY, {
-              toValue: ADD_SHEET_H,
-              duration: 220,
-              useNativeDriver: true,
-            }).start(() => setAddVisible(false));
+            Animated.timing(addSheetY, { toValue: ADD_SHEET_H, duration: 220, useNativeDriver: true })
+              .start(() => setAddVisible(false));
           }}
-          style={{
-            position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.2)',
-          }}
+          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.2)' }}
         >
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
             <Animated.View
@@ -719,7 +781,6 @@ export default function CalendarScreen({ navigation }: Props) {
               <View style={{ width: 42, height: 4, borderRadius: 2, backgroundColor: '#cbd5e1', alignSelf: 'center', marginBottom: 12 }} />
               <Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 12 }}>Add Event (Local JSON)</Text>
 
-              {/* Title */}
               <Text style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>Title</Text>
               <TextInput
                 value={formTitle}
@@ -731,7 +792,6 @@ export default function CalendarScreen({ navigation }: Props) {
                 }}
               />
 
-              {/* Start */}
               <Text style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>Start (YYYY-MM-DD HH:mm)</Text>
               <TextInput
                 value={formStart}
@@ -743,7 +803,6 @@ export default function CalendarScreen({ navigation }: Props) {
                 }}
               />
 
-              {/* End */}
               <Text style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>End (YYYY-MM-DD HH:mm)</Text>
               <TextInput
                 value={formEnd}
@@ -755,43 +814,35 @@ export default function CalendarScreen({ navigation }: Props) {
                 }}
               />
 
-              {/* Calendar pills */}
               <Text style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>Calendar</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
                 {(Array.isArray(CALENDARS) ? CALENDARS : [])
                   .filter(Boolean)
                   .map((c, idx) => (
-                  <Pressable
-                    key={c?.calendar_id ?? String(idx)}
-                    onPress={() => c?.calendar_id && setFormCalId(c.calendar_id)}
-                    style={{
-                      paddingHorizontal: 12, paddingVertical: 8, borderRadius: 9999,
-                      borderWidth: 1, borderColor: formCalId === c?.calendar_id ? '#111827' : '#cbd5e1',
-                      backgroundColor: formCalId === c?.calendar_id ? '#111827' : '#f8fafc',
-                    }}
-                  >
-                    <Text style={{ color: formCalId === c?.calendar_id ? 'white' : '#111827', fontWeight: '600' }}>
-                      {String(c?.name ?? 'Unnamed')}
-                    </Text>
-                  </Pressable>
-                ))}
+                    <Pressable
+                      key={c?.calendar_id ?? String(idx)}
+                      onPress={() => c?.calendar_id && setFormCalId(c.calendar_id)}
+                      style={{
+                        paddingHorizontal: 12, paddingVertical: 8, borderRadius: 9999,
+                        borderWidth: 1, borderColor: formCalId === c?.calendar_id ? '#111827' : '#cbd5e1',
+                        backgroundColor: formCalId === c?.calendar_id ? '#111827' : '#f8fafc',
+                      }}
+                    >
+                      <Text style={{ color: formCalId === c?.calendar_id ? 'white' : '#111827', fontWeight: '600' }}>
+                        {String(c?.name ?? 'Unnamed')}
+                      </Text>
+                    </Pressable>
+                  ))}
               </View>
 
-              {/* Actions */}
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
                 <Pressable
                   onPress={() => {
                     addSheetY.stopAnimation();
-                    Animated.timing(addSheetY, {
-                      toValue: ADD_SHEET_H,
-                      duration: 220,
-                      useNativeDriver: true,
-                    }).start(() => setAddVisible(false));
+                    Animated.timing(addSheetY, { toValue: ADD_SHEET_H, duration: 220, useNativeDriver: true })
+                      .start(() => setAddVisible(false));
                   }}
-                  style={{
-                    paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10,
-                    backgroundColor: '#e5e7eb',
-                  }}
+                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, backgroundColor: '#e5e7eb' }}
                 >
                   <Text style={{ fontWeight: '700' }}>Cancel</Text>
                 </Pressable>
@@ -799,7 +850,6 @@ export default function CalendarScreen({ navigation }: Props) {
                 <Pressable
                   onPress={async () => {
                     if (!formTitle.trim()) return;
-
                     const cal = (Array.isArray(CALENDARS) ? CALENDARS : []).find(c => c?.calendar_id === formCalId);
                     const inst = await saveLocalEvent({
                       calendar_id: formCalId,
@@ -809,31 +859,19 @@ export default function CalendarScreen({ navigation }: Props) {
                       color: cal?.color ?? undefined,
                     });
 
-                    // カレンダー即時反映（DayCell）
                     const dStr = dayjs(formStart).format('YYYY-MM-DD');
                     setLocalByDate(prev => {
                       const next = { ...prev };
                       (next[dStr] ||= []).push(inst);
                       return next;
                     });
+                    if (sheetVisible && sheetDate === dStr) setSheetItems(prev => [inst, ...prev]);
 
-                    // もし当日のシートを開いていれば、リストにも反映
-                    if (sheetVisible && sheetDate === dStr) {
-                      setSheetItems(prev => [inst, ...prev]);
-                    }
-
-                    // シート閉じる
                     addSheetY.stopAnimation();
-                    Animated.timing(addSheetY, {
-                      toValue: ADD_SHEET_H,
-                      duration: 220,
-                      useNativeDriver: true,
-                    }).start(() => setAddVisible(false));
+                    Animated.timing(addSheetY, { toValue: ADD_SHEET_H, duration: 220, useNativeDriver: true })
+                      .start(() => setAddVisible(false));
                   }}
-                  style={{
-                    paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10,
-                    backgroundColor: '#111827',
-                  }}
+                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, backgroundColor: '#111827' }}
                 >
                   <Text style={{ color: 'white', fontWeight: '700' }}>Save</Text>
                 </Pressable>
@@ -843,14 +881,11 @@ export default function CalendarScreen({ navigation }: Props) {
         </Pressable>
       )}
 
-      {/* ヘルプ / テスト投入ボトムシート */}
+      {/* 使い方 / テスト投入ボトムシート */}
       {helpVisible && (
         <Pressable
           onPress={closeHelp}
-          style={{
-            position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.25)',
-          }}
+          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.25)' }}
         >
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
             <Animated.View
@@ -871,27 +906,21 @@ export default function CalendarScreen({ navigation }: Props) {
               <Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 12 }}>使い方 & テスト投入</Text>
 
               <Text style={{ color: '#475569', lineHeight: 20, marginBottom: 12 }}>
-                ・日付をタップすると、その日のイベント一覧が下から開きます{'\n'}
-                ・右下の「＋」でローカルJSONにイベントを追加できます{'\n'}
-                ・追加先カレンダーは「＋」シート内のピル（丸ボタン）で選択します
+                ・日付タップでその日の予定が開きます{'\n'}
+                ・右下「＋」でローカルJSONへ予定追加{'\n'}
+                ・追加先カレンダーは「＋」シートの丸ボタンで選択
               </Text>
 
               <View style={{ height: 12 }} />
 
               <Text style={{ fontSize: 13, fontWeight: '700', marginBottom: 6 }}>▶ テストデータの投入</Text>
               <Text style={{ color: '#6b7280', fontSize: 12, marginBottom: 10 }}>
-                今表示している月に、選択中カレンダー（＋シートで選べる）へサンプル予定を数件追加します。
+                表示中の月に、選択中カレンダーへサンプル予定を追加します。
               </Text>
 
               <Pressable
                 onPress={injectTestEventsForThisMonth}
-                style={{
-                  alignSelf: 'flex-start',
-                  backgroundColor: '#111827',
-                  paddingHorizontal: 14,
-                  paddingVertical: 10,
-                  borderRadius: 10,
-                }}
+                style={{ alignSelf: 'flex-start', backgroundColor: '#111827', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10 }}
               >
                 <Text style={{ color: 'white', fontWeight: '700' }}>この月にテストイベントを投入</Text>
               </Pressable>
@@ -900,14 +929,7 @@ export default function CalendarScreen({ navigation }: Props) {
 
               <Pressable
                 onPress={closeHelp}
-                style={{
-                  alignSelf: 'flex-end',
-                  paddingHorizontal: 14,
-                  paddingVertical: 10,
-                  borderRadius: 10,
-                  backgroundColor: '#e5e7eb',
-                  marginTop: 16,
-                }}
+                style={{ alignSelf: 'flex-end', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: '#e5e7eb', marginTop: 16 }}
               >
                 <Text style={{ fontWeight: '700' }}>閉じる</Text>
               </Pressable>
