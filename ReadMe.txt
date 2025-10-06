@@ -1,4 +1,6 @@
 cd C:\dev\calect
+cd C:\dev\calect-mobile
+
 
 リスト表示
 & "$env:LOCALAPPDATA\Android\Sdk\emulator\emulator.exe" -list-avds

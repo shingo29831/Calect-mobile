@@ -3,9 +3,26 @@
   "compilerOptions": {
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
-    "allowJs": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+
+    "allowJs": false,
+    "checkJs": false,
+
+    "types": ["react", "react-native"]
   },
-  "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["**/node_modules", "**/Pods"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": [
+    "node_modules",
+    "ios",
+    "android",
+    "Pods",
+    "**/*.js",
+    "babel.config.js",
+    "metro.config.js",
+    "jest.config.js"
+  ]
 }
