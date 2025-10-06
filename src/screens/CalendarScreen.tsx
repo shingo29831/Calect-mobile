@@ -1,6 +1,6 @@
 // src/screens/CalendarScreen.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from 'react';
-import { View, Text, Pressable, Platform, TextInput, KeyboardAvoidingView } from 'react-native';
+import { View, Text, Pressable, Platform, TextInput, KeyboardAvoidingView, Animated } from 'react-native';
 import type { AppStateStatus } from 'react-native';
 import { CalendarList } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
@@ -603,8 +603,8 @@ export default function CalendarScreen({ navigation }: Props) {
           }}
         >
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-            <Pressable
-              onPress={(e) => e.stopPropagation()}
+            {/* ★ ここを Pressable → Animated.View に変更 */}
+            <Animated.View
               style={{
                 position: 'absolute',
                 left: 0, right: 0, bottom: 0,
@@ -742,7 +742,7 @@ export default function CalendarScreen({ navigation }: Props) {
                   <Text style={{ color: 'white', fontWeight: '700' }}>Save</Text>
                 </Pressable>
               </View>
-            </Pressable>
+            </Animated.View>
           </KeyboardAvoidingView>
         </Pressable>
       )}
