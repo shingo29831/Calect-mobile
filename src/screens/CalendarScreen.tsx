@@ -100,18 +100,27 @@ export default function CalendarScreen({ navigation }: Props) {
   const [sheetVisible, setSheetVisible] = useState(false);
   const [sheetDate, setSheetDate] = useState<string>(today);
   const [sheetItems, setSheetItems] = useState<any[]>([]);
-  const sheetY = useRef(new (require('react-native').Animated.Value)(SHEET_H)).current;
+  const sheetY = useRef(new Animated.Value(SHEET_H)).current;
 
   // ★ 追加用ボトムシート
   const [addVisible, setAddVisible] = useState(false);
   const ADD_SHEET_H = Math.floor(SCREEN_H * 0.65);
-  const addSheetY = useRef(new (require('react-native').Animated.Value)(ADD_SHEET_H)).current;
+  const addSheetY = useRef(new Animated.Value(ADD_SHEET_H)).current;
 
   // ★ 追加フォーム
   const [formTitle, setFormTitle] = useState('');
   const [formStart, setFormStart] = useState<string>(dayjs().format('YYYY-MM-DD HH:mm'));
   const [formEnd, setFormEnd] = useState<string>(dayjs().add(1, 'hour').format('YYYY-MM-DD HH:mm'));
-  const [formCalId, setFormCalId] = useState<string>(CALENDARS[1].calendar_id); // 既定: My: Private
+
+  // 旧: CALENDARS[1].calendar_id を直参照 → 安全な初期化に変更
+  const [formCalId, setFormCalId] = useState<string>(() => {
+    const list = Array.isArray(CALENDARS) ? CALENDARS : [];
+    return (
+      list.find(c => c?.name?.includes('My: Private'))?.calendar_id ??
+      list[0]?.calendar_id ??
+      'CAL_LOCAL_DEFAULT'
+    );
+  });
 
   // ★ ローカルイベント（日付別）
   const [localByDate, setLocalByDate] = useState<Record<string, any[]>>({});
@@ -289,26 +298,22 @@ export default function CalendarScreen({ navigation }: Props) {
     setSheetItems(list.slice(0, PAGE));
     setSheetVisible(true);
 
-    const { Animated, Easing } = require('react-native');
     requestAnimationFrame(() => {
       sheetY.stopAnimation();
       sheetY.setValue(SHEET_H);
       Animated.timing(sheetY, {
         toValue: 0,
         duration: 260,
-        easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }).start();
     });
   }, [filterEventsByEntity, sheetY]);
 
   const closeSheet = useCallback(() => {
-    const { Animated, Easing } = require('react-native');
     sheetY.stopAnimation();
     Animated.timing(sheetY, {
       toValue: SHEET_H,
       duration: 220,
-      easing: Easing.in(Easing.cubic),
       useNativeDriver: true,
     }).start(() => setSheetVisible(false));
   }, [sheetY]);
@@ -348,7 +353,7 @@ export default function CalendarScreen({ navigation }: Props) {
         base: { flex: 0, width: undefined, margin: 0, padding: 0, alignItems: 'stretch', justifyContent: 'flex-start' },
       },
       'stylesheet.calendar-list.main': { calendar: { paddingLeft: 0, paddingRight: 0, paddingTop: 0, marginTop: 0 } },
-      'stylesheet.calendar.header': { header: { marginBottom: 0, paddingVertical: 0, height: 0 } }, // ★ 0 に固定
+      'stylesheet.calendar.header': { header: { marginBottom: 0, paddingVertical: 0, height: 0 } },
     }),
     []
   );
@@ -543,20 +548,18 @@ export default function CalendarScreen({ navigation }: Props) {
           setFormEnd(dayjs(selected).hour(11).minute(0).format('YYYY-MM-DD HH:mm'));
           const safeCalId =
             (Array.isArray(CALENDARS)
-                ? (CALENDARS.find(c => c.name?.includes('My: Private'))?.calendar_id
+                ? (CALENDARS.find(c => c?.name?.includes('My: Private'))?.calendar_id
                     ?? CALENDARS[0]?.calendar_id)
                 : undefined)
             ?? 'CAL_LOCAL_DEFAULT';
-            setFormCalId(safeCalId);
+          setFormCalId(safeCalId);
           setAddVisible(true);
-          const { Animated, Easing } = require('react-native');
           requestAnimationFrame(() => {
             addSheetY.stopAnimation();
             addSheetY.setValue(ADD_SHEET_H);
             Animated.timing(addSheetY, {
               toValue: 0,
               duration: 260,
-              easing: Easing.out(Easing.cubic),
               useNativeDriver: true,
             }).start();
           });
@@ -588,12 +591,10 @@ export default function CalendarScreen({ navigation }: Props) {
       {addVisible && (
         <Pressable
           onPress={() => {
-            const { Animated, Easing } = require('react-native');
             addSheetY.stopAnimation();
             Animated.timing(addSheetY, {
               toValue: ADD_SHEET_H,
               duration: 220,
-              easing: Easing.in(Easing.cubic),
               useNativeDriver: true,
             }).start(() => setAddVisible(false));
           }}
@@ -603,7 +604,6 @@ export default function CalendarScreen({ navigation }: Props) {
           }}
         >
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-            {/* ★ ここを Pressable → Animated.View に変更 */}
             <Animated.View
               style={{
                 position: 'absolute',
@@ -660,18 +660,20 @@ export default function CalendarScreen({ navigation }: Props) {
               {/* Calendar pills */}
               <Text style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>Calendar</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-                {(Array.isArray(CALENDARS) ? CALENDARS : []).map((c) => (
+                {(Array.isArray(CALENDARS) ? CALENDARS : [])
+                  .filter(Boolean)
+                  .map((c, idx) => (
                   <Pressable
-                    key={c.calendar_id}
-                    onPress={() => setFormCalId(c.calendar_id)}
+                    key={c?.calendar_id ?? String(idx)}
+                    onPress={() => c?.calendar_id && setFormCalId(c.calendar_id)}
                     style={{
                       paddingHorizontal: 12, paddingVertical: 8, borderRadius: 9999,
-                      borderWidth: 1, borderColor: formCalId === c.calendar_id ? '#111827' : '#cbd5e1',
-                      backgroundColor: formCalId === c.calendar_id ? '#111827' : '#f8fafc',
+                      borderWidth: 1, borderColor: formCalId === c?.calendar_id ? '#111827' : '#cbd5e1',
+                      backgroundColor: formCalId === c?.calendar_id ? '#111827' : '#f8fafc',
                     }}
                   >
-                    <Text style={{ color: formCalId === c.calendar_id ? 'white' : '#111827', fontWeight: '600' }}>
-                      {c.name}
+                    <Text style={{ color: formCalId === c?.calendar_id ? 'white' : '#111827', fontWeight: '600' }}>
+                      {String(c?.name ?? 'Unnamed')}
                     </Text>
                   </Pressable>
                 ))}
@@ -681,12 +683,10 @@ export default function CalendarScreen({ navigation }: Props) {
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
                 <Pressable
                   onPress={() => {
-                    const { Animated, Easing } = require('react-native');
                     addSheetY.stopAnimation();
                     Animated.timing(addSheetY, {
                       toValue: ADD_SHEET_H,
                       duration: 220,
-                      easing: Easing.in(Easing.cubic),
                       useNativeDriver: true,
                     }).start(() => setAddVisible(false));
                   }}
@@ -702,7 +702,7 @@ export default function CalendarScreen({ navigation }: Props) {
                   onPress={async () => {
                     if (!formTitle.trim()) return;
 
-                    const cal = CALENDARS.find(c => c.calendar_id === formCalId)!;
+                    const cal = (Array.isArray(CALENDARS) ? CALENDARS : []).find(c => c?.calendar_id === formCalId);
                     const inst = await saveLocalEvent({
                       calendar_id: formCalId,
                       title: formTitle.trim(),
@@ -712,7 +712,7 @@ export default function CalendarScreen({ navigation }: Props) {
                     });
 
                     // カレンダー即時反映（DayCell）
-                    const dStr = dayjs.tz(formStart, 'Asia/Tokyo').format('YYYY-MM-DD');
+                    const dStr = dayjs(formStart).format('YYYY-MM-DD'); // ← tz を使わない安全版
                     setLocalByDate(prev => {
                       const next = { ...prev };
                       (next[dStr] ||= []).push(inst);
@@ -725,12 +725,10 @@ export default function CalendarScreen({ navigation }: Props) {
                     }
 
                     // シート閉じる
-                    const { Animated, Easing } = require('react-native');
                     addSheetY.stopAnimation();
                     Animated.timing(addSheetY, {
                       toValue: ADD_SHEET_H,
                       duration: 220,
-                      easing: Easing.in(Easing.cubic),
                       useNativeDriver: true,
                     }).start(() => setAddVisible(false));
                   }}
