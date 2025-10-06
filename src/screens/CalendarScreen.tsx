@@ -8,6 +8,7 @@ import dayjs from '../lib/dayjs';
 import { listInstancesByDate } from '../store/db';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation';
+import type { EventInstance } from '../api/types';
 
 import {
   EntityItem,
@@ -34,7 +35,7 @@ import { styles } from './calendar/calendarStyles';
 
 // ★ 追加：ローカル保存ユーティリティと時間ユーティリティ
 import { loadLocalEvents, saveLocalEvent } from '../store/localEvents';
-import { toUTCISO, fromUTC, startOfLocalDay, endOfLocalDay } from '../utils/time';
+import { fromUTC, startOfLocalDay, endOfLocalDay } from '../utils/time';
 import { CALENDARS } from '../store/seeds';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Calendar'>;
@@ -89,30 +90,35 @@ export default function CalendarScreen({ navigation }: Props) {
 
   const [innerW, setInnerW] = useState<number>(0);
   const [gridH, setGridH] = useState<number>(0);
-  const [weekHeaderH, setWeekHeaderH] = useState<number>(0); // ★ 実測の曜日ヘッダー高さ
+  const [weekHeaderH, setWeekHeaderH] = useState<number>(0);
   const SHEET_H = Math.floor(SCREEN_H * 0.6);
 
   // ドロワー
   const left = useAnimatedDrawer(DRAWER_W, 'left');
   const right = useAnimatedDrawer(PROFILE_DRAWER_W, 'right');
 
-  // ボトムシート（既存：日別イベント一覧）
+  // 日別イベントシート
   const [sheetVisible, setSheetVisible] = useState(false);
   const [sheetDate, setSheetDate] = useState<string>(today);
   const [sheetItems, setSheetItems] = useState<any[]>([]);
   const sheetY = useRef(new Animated.Value(SHEET_H)).current;
 
-  // ★ 追加用ボトムシート
+  // 追加用ボトムシート
   const [addVisible, setAddVisible] = useState(false);
   const ADD_SHEET_H = Math.floor(SCREEN_H * 0.65);
   const addSheetY = useRef(new Animated.Value(ADD_SHEET_H)).current;
 
-  // ★ 追加フォーム
+  // ★ ヘルプ（使い方・テスト投入）ボトムシート
+  const [helpVisible, setHelpVisible] = useState(false);
+  const HELP_SHEET_H = Math.floor(SCREEN_H * 0.62);
+  const helpSheetY = useRef(new Animated.Value(HELP_SHEET_H)).current;
+
+  // 追加フォーム
   const [formTitle, setFormTitle] = useState('');
   const [formStart, setFormStart] = useState<string>(dayjs().format('YYYY-MM-DD HH:mm'));
   const [formEnd, setFormEnd] = useState<string>(dayjs().add(1, 'hour').format('YYYY-MM-DD HH:mm'));
 
-  // 旧: CALENDARS[1].calendar_id を直参照 → 安全な初期化に変更
+  // 初期カレンダー選択は安全に決定
   const [formCalId, setFormCalId] = useState<string>(() => {
     const list = Array.isArray(CALENDARS) ? CALENDARS : [];
     return (
@@ -122,12 +128,12 @@ export default function CalendarScreen({ navigation }: Props) {
     );
   });
 
-  // ★ ローカルイベント（日付別）
+  // ローカルイベント（日付別）
   const [localByDate, setLocalByDate] = useState<Record<string, any[]>>({});
 
   const initialCurrent = useRef(dayjs().startOf('month').format('YYYY-MM-DD')).current;
 
-  // セル高さ：固定値ではなく “曜日以下のレイアウト実測” から算出
+  // セル高さ
   const cellH = useMemo(() => {
     if (gridH <= 0 || weekHeaderH <= 0) return 0;
     const usable = gridH - MONTH_TITLE_HEIGHT - weekHeaderH;
@@ -135,7 +141,7 @@ export default function CalendarScreen({ navigation }: Props) {
     return Math.floor(per);
   }, [gridH, weekHeaderH]);
 
-  // CalendarList に渡す高さは “グリッドのみ”
+  // カレンダーBody高さ
   const calendarBodyH = useMemo(() => {
     if (cellH <= 0) return 0;
     return Math.floor(cellH * ROWS);
@@ -153,7 +159,7 @@ export default function CalendarScreen({ navigation }: Props) {
     }
   }, [innerW, cellH]);
 
-  // ==== 月ヘッダ切替：デバウンス + 後始末 ====
+  // ==== 月ヘッダ切替：デバウンス ====
   const monthDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onVisibleMonthsChange = useCallback((months: Array<{ year: number; month: number }>) => {
     if (!months?.length) return;
@@ -200,7 +206,7 @@ export default function CalendarScreen({ navigation }: Props) {
     });
   }, [getVisibleGroupIds, selectedEntity]);
 
-  // ==== 月データ生成を少し遅延してUIを滑らかに ====
+  // ==== 月データ生成を少し遅延 ====
   const deferredMonth = useDeferredValue(currentMonth);
   const monthDates = useMemo(() => getMonthRangeDates(deferredMonth), [deferredMonth]);
 
@@ -211,7 +217,7 @@ export default function CalendarScreen({ navigation }: Props) {
     sortMode
   );
 
-  // ★ “その月のローカルイベント” を読み込み、日付キーでまとめる
+  // ★ その月のローカルイベントを読み込み
   useEffect(() => {
     const run = async () => {
       const list = await loadLocalEvents(); // all local
@@ -444,6 +450,74 @@ export default function CalendarScreen({ navigation }: Props) {
     return () => sub.remove();
   }, [currentMonth]);
 
+  // ========== ヘルプ / テスト投入 ==========
+  const openHelp = useCallback(() => {
+    setHelpVisible(true);
+    requestAnimationFrame(() => {
+      helpSheetY.stopAnimation();
+      helpSheetY.setValue(HELP_SHEET_H);
+      Animated.timing(helpSheetY, { toValue: 0, duration: 260, useNativeDriver: true }).start();
+    });
+  }, [helpSheetY]);
+
+  const closeHelp = useCallback(() => {
+    helpSheetY.stopAnimation();
+    Animated.timing(helpSheetY, { toValue: HELP_SHEET_H, duration: 220, useNativeDriver: true })
+      .start(() => setHelpVisible(false));
+  }, [helpSheetY]);
+
+    const injectTestEventsForThisMonth = useCallback(async () => {
+    // 現在表示中の月のいくつかの日にイベントを投入
+    const monthStart = dayjs(currentMonth + '-01');
+
+    const samples: Array<{ day: number; title: string; start: string; end: string }> = [
+      { day: 3,  title: 'Test: Standup',    start: '10:00', end: '10:30' },
+      { day: 7,  title: 'Test: 1on1',       start: '14:00', end: '14:30' },
+      { day: 12, title: 'Test: Design Mtg', start: '11:00', end: '12:00' },
+      { day: 18, title: 'Test: Family',     start: '18:00', end: '19:00' },
+      { day: 25, title: 'Test: Focus',      start: '09:00', end: '11:00' },
+    ];
+
+    const cal = (Array.isArray(CALENDARS) ? CALENDARS : []).find(c => c?.calendar_id === formCalId);
+    const color = cal?.color ?? undefined;
+
+    const created: Array<{ inst: EventInstance; dStr: string }> = [];
+
+    for (const smp of samples) {
+      const d = monthStart.date(smp.day);
+      const startLocalISO = d.format(`YYYY-MM-DD ${smp.start}`);
+      const endLocalISO   = d.format(`YYYY-MM-DD ${smp.end}`);
+      const inst = await saveLocalEvent({
+        calendar_id: formCalId,
+        title: smp.title,
+        startLocalISO,
+        endLocalISO,
+        color,
+      });
+      created.push({ inst, dStr: d.format('YYYY-MM-DD') });
+    }
+
+    // カレンダー即時反映（DayCell）
+    setLocalByDate(prev => {
+      const next = { ...prev };
+      for (const { inst, dStr } of created) {
+        (next[dStr] ||= []).push(inst);
+      }
+      return next;
+    });
+
+    // もしシートを開いている日と一致すればリストにも反映
+    if (sheetVisible) {
+      const addedForSheet = created.filter(x => x.dStr === sheetDate).map(x => x.inst);
+      if (addedForSheet.length > 0) {
+        setSheetItems(prev => [...addedForSheet, ...prev]);
+      }
+    }
+
+    closeHelp();
+  }, [currentMonth, formCalId, sheetDate, sheetVisible, closeHelp]);
+
+
   return (
     <View style={styles.container}>
       {/* カレンダー */}
@@ -469,7 +543,7 @@ export default function CalendarScreen({ navigation }: Props) {
             {innerW > 0 ? <WeekHeader colWBase={colWBase} colWLast={colWLast} /> : null}
           </View>
 
-          {/* CalendarList（曜日直下にピッタリ合う） */}
+          {/* CalendarList */}
           <View style={{ overflow: 'hidden' }}>
             {calReady && weekHeaderH > 0 && (
               <CalendarList
@@ -539,19 +613,17 @@ export default function CalendarScreen({ navigation }: Props) {
         rowHeight={ROW_HEIGHT}
       />
 
-      {/* 右下 FAB */}
+      {/* 右下 ＋ FAB */}
       <Pressable
         onPress={() => {
           setFormTitle('');
           // 選択日の 10:00-11:00 を初期値
           setFormStart(dayjs(selected).hour(10).minute(0).format('YYYY-MM-DD HH:mm'));
           setFormEnd(dayjs(selected).hour(11).minute(0).format('YYYY-MM-DD HH:mm'));
+          const list = Array.isArray(CALENDARS) ? CALENDARS : [];
           const safeCalId =
-            (Array.isArray(CALENDARS)
-                ? (CALENDARS.find(c => c?.name?.includes('My: Private'))?.calendar_id
-                    ?? CALENDARS[0]?.calendar_id)
-                : undefined)
-            ?? 'CAL_LOCAL_DEFAULT';
+            (list.find(c => c?.name?.includes('My: Private'))?.calendar_id ?? list[0]?.calendar_id) ??
+            'CAL_LOCAL_DEFAULT';
           setFormCalId(safeCalId);
           setAddVisible(true);
           requestAnimationFrame(() => {
@@ -585,6 +657,32 @@ export default function CalendarScreen({ navigation }: Props) {
         }}
       >
         <Text style={{ color: 'white', fontSize: 28, lineHeight: 28, marginTop: -2 }}>＋</Text>
+      </Pressable>
+
+      {/* 左下 ？ FAB（使い方 / テスト投入） */}
+      <Pressable
+        onPress={openHelp}
+        hitSlop={10}
+        style={{
+          position: 'absolute',
+          left: 18,
+          bottom: 24,
+          width: 44,
+          height: 44,
+          borderRadius: 22,
+          backgroundColor: '#e5e7eb',
+          alignItems: 'center',
+          justifyContent: 'center',
+          shadowColor: '#000',
+          shadowOpacity: 0.15,
+          shadowRadius: 6,
+          shadowOffset: { width: 0, height: 3 },
+          elevation: 4,
+          borderWidth: HAIR_SAFE,
+          borderColor: '#cbd5e1',
+        }}
+      >
+        <Text style={{ color: '#111827', fontSize: 20, lineHeight: 20 }}>?</Text>
       </Pressable>
 
       {/* 追加ボトムシート */}
@@ -712,7 +810,7 @@ export default function CalendarScreen({ navigation }: Props) {
                     });
 
                     // カレンダー即時反映（DayCell）
-                    const dStr = dayjs(formStart).format('YYYY-MM-DD'); // ← tz を使わない安全版
+                    const dStr = dayjs(formStart).format('YYYY-MM-DD');
                     setLocalByDate(prev => {
                       const next = { ...prev };
                       (next[dStr] ||= []).push(inst);
@@ -740,6 +838,79 @@ export default function CalendarScreen({ navigation }: Props) {
                   <Text style={{ color: 'white', fontWeight: '700' }}>Save</Text>
                 </Pressable>
               </View>
+            </Animated.View>
+          </KeyboardAvoidingView>
+        </Pressable>
+      )}
+
+      {/* ヘルプ / テスト投入ボトムシート */}
+      {helpVisible && (
+        <Pressable
+          onPress={closeHelp}
+          style={{
+            position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.25)',
+          }}
+        >
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+            <Animated.View
+              style={{
+                position: 'absolute',
+                left: 0, right: 0, bottom: 0,
+                height: HELP_SHEET_H,
+                backgroundColor: 'white',
+                borderTopLeftRadius: 16,
+                borderTopRightRadius: 16,
+                borderWidth: HAIR_SAFE,
+                borderColor: '#e5e7eb',
+                padding: 16,
+                transform: [{ translateY: helpSheetY }],
+              }}
+            >
+              <View style={{ width: 42, height: 4, borderRadius: 2, backgroundColor: '#cbd5e1', alignSelf: 'center', marginBottom: 12 }} />
+              <Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 12 }}>使い方 & テスト投入</Text>
+
+              <Text style={{ color: '#475569', lineHeight: 20, marginBottom: 12 }}>
+                ・日付をタップすると、その日のイベント一覧が下から開きます{'\n'}
+                ・右下の「＋」でローカルJSONにイベントを追加できます{'\n'}
+                ・追加先カレンダーは「＋」シート内のピル（丸ボタン）で選択します
+              </Text>
+
+              <View style={{ height: 12 }} />
+
+              <Text style={{ fontSize: 13, fontWeight: '700', marginBottom: 6 }}>▶ テストデータの投入</Text>
+              <Text style={{ color: '#6b7280', fontSize: 12, marginBottom: 10 }}>
+                今表示している月に、選択中カレンダー（＋シートで選べる）へサンプル予定を数件追加します。
+              </Text>
+
+              <Pressable
+                onPress={injectTestEventsForThisMonth}
+                style={{
+                  alignSelf: 'flex-start',
+                  backgroundColor: '#111827',
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  borderRadius: 10,
+                }}
+              >
+                <Text style={{ color: 'white', fontWeight: '700' }}>この月にテストイベントを投入</Text>
+              </Pressable>
+
+              <View style={{ flex: 1 }} />
+
+              <Pressable
+                onPress={closeHelp}
+                style={{
+                  alignSelf: 'flex-end',
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  borderRadius: 10,
+                  backgroundColor: '#e5e7eb',
+                  marginTop: 16,
+                }}
+              >
+                <Text style={{ fontWeight: '700' }}>閉じる</Text>
+              </Pressable>
             </Animated.View>
           </KeyboardAvoidingView>
         </Pressable>
