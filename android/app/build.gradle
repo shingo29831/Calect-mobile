@@ -2,86 +2,83 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
-/**
- * This is the configuration block to customize your React Native Android app.
- * By default you don't need to apply any configuration, just uncomment the lines you need.
- */
 react {
-    /* Autolinking */
-    autolinkLibrariesWithApp()
+  autolinkLibrariesWithApp()
 }
 
-/**
- * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
- */
 def enableProguardInReleaseBuilds = false
-
-/**
- * The preferred build flavor of JavaScriptCore (JSC)
- */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+// gradle.properties の reactNativeArchitectures と連動（未指定なら4 ABI）
+def abiList = (project.findProperty("reactNativeArchitectures")
+        ?: "armeabi-v7a,arm64-v8a,x86,x86_64").split(',')
+def useActiveArchOnly = project.hasProperty("reactNativeArchitectures")
+
 android {
-    ndkVersion rootProject.ext.ndkVersion
-    buildToolsVersion rootProject.ext.buildToolsVersion
-    compileSdk rootProject.ext.compileSdkVersion
+  ndkVersion rootProject.ext.ndkVersion
+  buildToolsVersion rootProject.ext.buildToolsVersion
+  compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.calect"
-    defaultConfig {
-        applicationId "com.calect"
-        minSdkVersion rootProject.ext.minSdkVersion
-        targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+  namespace "com.calect"
 
-        // ▼ デバッグ時だけ ABI を絞りたい場合は下の devAbi プロパティで制御（例: -PdevAbi=arm64-v8a）
-        if (project.hasProperty("devAbi")) {
-            ndk {
-                abiFilters project.getProperty("devAbi")
-            }
-        }
+  defaultConfig {
+    applicationId "com.calect"
+    minSdkVersion rootProject.ext.minSdkVersion
+    targetSdkVersion rootProject.ext.targetSdkVersion
+    versionCode 1
+    versionName "1.0"
+
+    // active-arch-only 等で reactNativeArchitectures が渡されたときだけ ndk を使う
+    if (useActiveArchOnly) {
+      ndk { abiFilters abiList }
     }
+  }
 
-    signingConfigs {
-        debug {
-            storeFile file('debug.keystore')
-            storePassword 'android'
-            keyAlias 'androiddebugkey'
-            keyPassword 'android'
-        }
+  signingConfigs {
+    debug {
+      storeFile file('debug.keystore')
+      storePassword 'android'
+      keyAlias 'androiddebugkey'
+      keyPassword 'android'
     }
+  }
 
-    buildTypes {
-        debug {
-            signingConfig signingConfigs.debug
-        }
-        release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
-            minifyEnabled enableProguardInReleaseBuilds
-            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
-        }
+  buildTypes {
+    debug {
+      signingConfig signingConfigs.debug
+      minifyEnabled false
     }
+    release {
+      signingConfig signingConfigs.debug
+      minifyEnabled enableProguardInReleaseBuilds
+      proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+    }
+  }
 
-    // ▼ ABIごとにAPKを分割（サイズ削減）。AAB 配布ならあってもOK、APK直配布で効果大。
-    splits {
-        abi {
-            enable true
-            reset()
-            include 'armeabi-v7a', 'arm64-v8a'
-            universalApk false
-        }
+  // reactNativeArchitectures が「未指定」のときだけ splits を使う（衝突回避）
+  splits {
+    abi {
+      enable !useActiveArchOnly
+      if (!useActiveArchOnly) {
+        reset()
+        include abiList
+        universalApk false
+      }
     }
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+  kotlinOptions { jvmTarget = '17' }
 }
 
 dependencies {
-    // The version of react-native is set by the React Native Gradle Plugin
-    implementation("com.facebook.react:react-android")
-
-    if (hermesEnabled.toBoolean()) {
-        implementation("com.facebook.react:hermes-android")
-    } else {
-        implementation jscFlavor
-    }
+  implementation("com.facebook.react:react-android")
+  if (hermesEnabled.toBoolean()) {
+    implementation("com.facebook.react:hermes-android")
+  } else {
+    implementation jscFlavor
+  }
 }
