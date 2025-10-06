@@ -1351,6 +1351,11 @@
   dependencies:
     eslint-scope "5.1.1"
 
+"@noble/hashes@^1.3.2":
+  version "1.8.0"
+  resolved "https://registry.npmjs.org/@noble/hashes/-/hashes-1.8.0.tgz"
+  integrity sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==
+
 "@nodelib/fs.scandir@2.1.5":
   version "2.1.5"
   resolved "https://registry.npmjs.org/@nodelib/fs.scandir/-/fs.scandir-2.1.5.tgz"
@@ -1886,6 +1891,18 @@
   version "7.0.15"
   resolved "https://registry.npmjs.org/@types/json-schema/-/json-schema-7.0.15.tgz"
   integrity sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==
+
+"@types/libsodium-wrappers-sumo@^0.7.8":
+  version "0.7.8"
+  resolved "https://registry.npmjs.org/@types/libsodium-wrappers-sumo/-/libsodium-wrappers-sumo-0.7.8.tgz"
+  integrity sha512-N2+df4MB/A+W0RAcTw7A5oxKgzD+Vh6Ye7lfjWIi5SdTzVLfHPzxUjhwPqHLO5Ev9fv/+VHl+sUaUuTg4fUPqw==
+  dependencies:
+    "@types/libsodium-wrappers" "*"
+
+"@types/libsodium-wrappers@*", "@types/libsodium-wrappers@^0.7.13":
+  version "0.7.14"
+  resolved "https://registry.npmjs.org/@types/libsodium-wrappers/-/libsodium-wrappers-0.7.14.tgz"
+  integrity sha512-5Kv68fXuXK0iDuUir1WPGw2R9fOZUlYlSAa0ztMcL0s0BfIDTqg9GXz8K30VJpPP3sxWhbolnQma2x+/TfkzDQ==
 
 "@types/node@*":
   version "24.6.0"
@@ -4684,6 +4701,30 @@ levn@^0.4.1:
     prelude-ls "^1.2.1"
     type-check "~0.4.0"
 
+libsodium-sumo@^0.7.15:
+  version "0.7.15"
+  resolved "https://registry.npmjs.org/libsodium-sumo/-/libsodium-sumo-0.7.15.tgz"
+  integrity sha512-5tPmqPmq8T8Nikpm1Nqj0hBHvsLFCXvdhBFV7SGOitQPZAA6jso8XoL0r4L7vmfKXr486fiQInvErHtEvizFMw==
+
+libsodium-wrappers-sumo@^0.7.13:
+  version "0.7.15"
+  resolved "https://registry.npmjs.org/libsodium-wrappers-sumo/-/libsodium-wrappers-sumo-0.7.15.tgz"
+  integrity sha512-aSWY8wKDZh5TC7rMvEdTHoyppVq/1dTSAeAR7H6pzd6QRT3vQWcT5pGwCotLcpPEOLXX6VvqihSPkpEhYAjANA==
+  dependencies:
+    libsodium-sumo "^0.7.15"
+
+libsodium-wrappers@^0.7.13:
+  version "0.7.15"
+  resolved "https://registry.npmjs.org/libsodium-wrappers/-/libsodium-wrappers-0.7.15.tgz"
+  integrity sha512-E4anqJQwcfiC6+Yrl01C1m8p99wEhLmJSs0VQqST66SbQXXBoaJY0pF4BNjRYa/sOQAxx6lXAaAFIlx+15tXJQ==
+  dependencies:
+    libsodium "^0.7.15"
+
+libsodium@^0.7.15:
+  version "0.7.15"
+  resolved "https://registry.npmjs.org/libsodium/-/libsodium-0.7.15.tgz"
+  integrity sha512-sZwRknt/tUpE2AwzHq3jEyUU5uvIZHtSssktXq7owd++3CSgn8RGrv6UZJJBpP7+iBghBqe7Z06/2M31rI2NKw==
+
 lighthouse-logger@^1.0.0:
   version "1.4.2"
   resolved "https://registry.npmjs.org/lighthouse-logger/-/lighthouse-logger-1.4.2.tgz"
@@ -5576,6 +5617,22 @@ react-native-is-edge-to-edge@^1.2.1:
   version "1.2.1"
   resolved "https://registry.npmjs.org/react-native-is-edge-to-edge/-/react-native-is-edge-to-edge-1.2.1.tgz"
   integrity sha512-FLbPWl/MyYQWz+KwqOZsSyj2JmLKglHatd3xLZWskXOpRaio4LfEDEz8E/A6uD8QoTHW6Aobw1jbEwK7KMgR7Q==
+
+react-native-keychain@^10.0.0:
+  version "10.0.0"
+  resolved "https://registry.npmjs.org/react-native-keychain/-/react-native-keychain-10.0.0.tgz"
+  integrity sha512-YzPKSAnSzGEJ12IK6CctNLU79T1W15WDrElRQ+1/FsOazGX9ucFPTQwgYe8Dy8jiSEDJKM4wkVa3g4lD2Z+Pnw==
+
+react-native-libsodium@^1.4.0:
+  version "1.4.0"
+  resolved "https://registry.npmjs.org/react-native-libsodium/-/react-native-libsodium-1.4.0.tgz"
+  integrity sha512-1OHrKjv1nM8wYHn116fnhA8SORGNlSoq1vHhYq/PddHg4Iy3vPiQXA2r1w5GJiKYBzyA8AZfHyq5zo/xfA/oKg==
+  dependencies:
+    "@noble/hashes" "^1.3.2"
+    "@types/libsodium-wrappers" "^0.7.13"
+    "@types/libsodium-wrappers-sumo" "^0.7.8"
+    libsodium-wrappers "^0.7.13"
+    libsodium-wrappers-sumo "^0.7.13"
 
 react-native-safe-area-context@^5.6.1, "react-native-safe-area-context@>= 4.0.0":
   version "5.6.1"
