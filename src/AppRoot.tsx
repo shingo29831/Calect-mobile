@@ -14,10 +14,11 @@ type SecureStoreNative = {
 };
 const { SecureStore } = NativeModules as { SecureStore: SecureStoreNative };
 
-// ストア読み込み & 同期
-import { loadLocalStore } from './store/localFile';
+// ストア読み込み & 同期（storage.ts に統一）
+import { loadPersistFile } from './store/storage';
 import { replaceAllInstances } from './store/db';
 import { runIncrementalSync, exampleFetchServerDiff } from './store/sync';
+import type { EventInstance as ApiEventInstance } from './api/types';
 
 const qc = new QueryClient();
 
@@ -48,15 +49,34 @@ if (__DEV__) {
   };
 }
 
+// storage.EventInstance(instance_id: number|string) → api.EventInstance(number) へ安全に変換
+function toApiInstancesSafe(
+  rows: Array<{ instance_id: number | string } & Omit<ApiEventInstance, 'instance_id'>>
+): ApiEventInstance[] {
+  const out: ApiEventInstance[] = [];
+  for (const row of rows) {
+    const id =
+      typeof row.instance_id === 'number'
+        ? row.instance_id
+        : /^\d+$/.test(String(row.instance_id))
+        ? Number(row.instance_id)
+        : undefined;
+    if (id === undefined) continue;
+    out.push({ ...(row as any), instance_id: id });
+  }
+  return out;
+}
+
 /** 起動時ブート処理（UIはブロックしない） */
 function Bootstrapper() {
   useEffect(() => {
     (async () => {
       try {
-        // 1) ローカルのスナップショットを先に反映（即座にUIに出す）
-        const local = await loadLocalStore();
-        if (local?.instances?.length) {
-          replaceAllInstances(local.instances);
+        // 1) ローカルの永続ファイルを先に反映（即座にUIに出す）
+        const file = await loadPersistFile();
+        if (Array.isArray(file.instances) && file.instances.length > 0) {
+          const mapped = toApiInstancesSafe(file.instances as any);
+          if (mapped.length) replaceAllInstances(mapped);
         }
 
         // 2) （開発時のみ）SecureStoreの簡易自己テスト
