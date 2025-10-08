@@ -96,6 +96,10 @@ const toLocalSegment = (ev: EventInstance): EventSegmentMinimal => ({
   spanRight: false,
 });
 
+// ★ EventInstanceの重複判定用キー（idが無い型でも安定）
+const dedupeKey = (ev: EventInstance) =>
+  `${String(ev.calendar_id ?? '')}|${String(ev.title ?? '')}|${String(ev.start_at ?? '')}|${String(ev.end_at ?? '')}`;
+
 export default function CalendarScreen({ navigation }: Props) {
   const today = dayjs().format('YYYY-MM-DD');
   const [selected, setSelected] = useState<string>(today);
@@ -157,6 +161,10 @@ export default function CalendarScreen({ navigation }: Props) {
 
   // ローカルイベント（日付別）
   const [localByDate, setLocalByDate] = useState<Record<string, EventInstance[]>>({});
+
+  // ★ 二重保存ロック（UIと同期的ガード）
+  const [isSaving, setIsSaving] = useState(false);
+  const savingRef = useRef(false);
 
   const initialCurrent = useRef(dayjs().startOf('month').format('YYYY-MM-DD')).current;
 
@@ -257,7 +265,7 @@ export default function CalendarScreen({ navigation }: Props) {
         const s = fromUTC(ev.start_at);
         const e = fromUTC(ev.end_at);
 
-        // この月にかかる区間にクリップ
+      // この月にかかる区間にクリップ
         const clipStart = s.isAfter(monthStart) ? s : monthStart;
         const clipEnd   = e.isBefore(monthEnd) ? e : monthEnd;
         if (clipEnd.isBefore(clipStart)) continue;
@@ -814,27 +822,6 @@ export default function CalendarScreen({ navigation }: Props) {
                 }}
               />
 
-              <Text style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>Calendar</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-                {(Array.isArray(CALENDARS) ? CALENDARS : [])
-                  .filter(Boolean)
-                  .map((c, idx) => (
-                    <Pressable
-                      key={c?.calendar_id ?? String(idx)}
-                      onPress={() => c?.calendar_id && setFormCalId(c.calendar_id)}
-                      style={{
-                        paddingHorizontal: 12, paddingVertical: 8, borderRadius: 9999,
-                        borderWidth: 1, borderColor: formCalId === c?.calendar_id ? '#111827' : '#cbd5e1',
-                        backgroundColor: formCalId === c?.calendar_id ? '#111827' : '#f8fafc',
-                      }}
-                    >
-                      <Text style={{ color: formCalId === c?.calendar_id ? 'white' : '#111827', fontWeight: '600' }}>
-                        {String(c?.name ?? 'Unnamed')}
-                      </Text>
-                    </Pressable>
-                  ))}
-              </View>
-
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
                 <Pressable
                   onPress={() => {
@@ -849,31 +836,56 @@ export default function CalendarScreen({ navigation }: Props) {
 
                 <Pressable
                   onPress={async () => {
-                    if (!formTitle.trim()) return;
-                    const cal = (Array.isArray(CALENDARS) ? CALENDARS : []).find(c => c?.calendar_id === formCalId);
-                    const inst = await saveLocalEvent({
-                      calendar_id: formCalId,
-                      title: formTitle.trim(),
-                      startLocalISO: formStart,
-                      endLocalISO: formEnd,
-                      color: cal?.color ?? undefined,
-                    });
+                    // ---- ★ 二重押しロック ----
+                    if (savingRef.current) return;
+                    savingRef.current = true;
+                    setIsSaving(true);
+                    try {
+                      if (!formTitle.trim()) return;
 
-                    const dStr = dayjs(formStart).format('YYYY-MM-DD');
-                    setLocalByDate(prev => {
-                      const next = { ...prev };
-                      (next[dStr] ||= []).push(inst);
-                      return next;
-                    });
-                    if (sheetVisible && sheetDate === dStr) setSheetItems(prev => [inst, ...prev]);
+                      const cal = (Array.isArray(CALENDARS) ? CALENDARS : []).find(c => c?.calendar_id === formCalId);
+                      const inst = await saveLocalEvent({
+                        calendar_id: formCalId,
+                        title: formTitle.trim(),
+                        startLocalISO: formStart,
+                        endLocalISO: formEnd,
+                        color: cal?.color ?? undefined,
+                      });
 
-                    addSheetY.stopAnimation();
-                    Animated.timing(addSheetY, { toValue: ADD_SHEET_H, duration: 220, useNativeDriver: true })
-                      .start(() => setAddVisible(false));
+                      const dStr = dayjs(formStart).format('YYYY-MM-DD');
+                      setLocalByDate(prev => {
+                        const next = { ...prev };
+                        const list = (next[dStr] ||= []);
+                        const k = dedupeKey(inst);
+                        if (!list.some(x => dedupeKey(x) === k)) list.unshift(inst);
+                        return next;
+                      });
+
+                      if (sheetVisible && sheetDate === dStr) {
+                        const k = dedupeKey(inst);
+                        setSheetItems(prev => (prev.some(x => dedupeKey(x) === k) ? prev : [inst, ...prev]));
+                      }
+
+                      // 閉じるアニメーション
+                      addSheetY.stopAnimation();
+                      Animated.timing(addSheetY, { toValue: ADD_SHEET_H, duration: 220, useNativeDriver: true })
+                        .start(() => setAddVisible(false));
+                    } finally {
+                      setIsSaving(false);
+                      savingRef.current = false;
+                    }
                   }}
-                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, backgroundColor: '#111827' }}
+                  disabled={isSaving}
+                  style={{
+                    paddingHorizontal: 16,
+                    paddingVertical: 12,
+                    borderRadius: 10,
+                    backgroundColor: isSaving ? '#9ca3af' : '#111827'
+                  }}
                 >
-                  <Text style={{ color: 'white', fontWeight: '700' }}>Save</Text>
+                  <Text style={{ color: 'white', fontWeight: '700' }}>
+                    {isSaving ? 'Saving…' : 'Save'}
+                  </Text>
                 </Pressable>
               </View>
             </Animated.View>
