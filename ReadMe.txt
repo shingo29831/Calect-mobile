@@ -18,3 +18,8 @@ npx react-native start --reset-cache
 
 ビルドしてアプリ起動
 npx react-native run-android
+
+
+リリースアプリ作成
+cd android
+.\gradlew assembleRelease

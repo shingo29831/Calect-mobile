@@ -12,9 +12,10 @@
     "allowJs": false,
     "checkJs": false,
 
-    "types": ["react", "react-native"]
+    "baseUrl": ".",
+    "typeRoots": ["./src/@types", "./node_modules/@types"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/@types/**/*.d.ts"],
   "exclude": [
     "node_modules",
     "ios",

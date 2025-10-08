@@ -2,6 +2,17 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+/**
+ * ★ Debug でも JS バンドルを同梱（Metro 不要で起動できる）
+ *   - devDisabledInDebug は任意。true にすると Dev メニュー/HMR を無効化
+ */
+project.ext.react = [
+  bundleInDebug      : true,
+//   devDisabledInDebug : true,
+  // 必要ならエントリを明示（通常は自動検出でOK）
+  // entryFile       : "index.js",
+]
+
 react {
   autolinkLibrariesWithApp()
 }
@@ -76,6 +87,9 @@ android {
 
 dependencies {
   implementation("com.facebook.react:react-android")
+  implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+  // ★ Hermes/JSC はどちらか片方のみを有効に（重複指定を解消）
   if (hermesEnabled.toBoolean()) {
     implementation("com.facebook.react:hermes-android")
   } else {
