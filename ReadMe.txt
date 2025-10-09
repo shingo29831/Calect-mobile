@@ -248,6 +248,7 @@ JSON形式
   "calendars": {
     "{カレンダーID_1 例: 01CALAAAAAAAAAAAAAAAAAAAAAA}": {
       "background_image": "{ローカル画像URI 例: file:///storage/emulated/0/Android/data/com.calect/files/covers/personal.jpg}",
+      "icon_image_path": "file:///storage/emulated/0/.../icons/personal.png",
       "event_style_default": {
         "font_family": "{フォント名 例: NotoSansJP}",
         "font_color": "{HEXカラー 例: #111827}",
@@ -276,6 +277,7 @@ JSON形式
 
     "{カレンダーID_2 例: 01CALBBBBBBBBBBBBBBBBBBBBBB}": {
       "background_image": "{コンテントURI 例: content://com.calect.fileprovider/my_images/covers/team-green.png}",
+      "icon_image_path": "https://example.com/assets/icons/team.png",
       "event_style_default": {
         "font_family": "{フォント名 例: Inter}",
         "font_color": "{HEXカラー 例: #052E16}",

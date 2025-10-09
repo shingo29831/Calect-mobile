@@ -1,6 +1,6 @@
 // src/screens/CalendarScreen.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from 'react';
-import { View, Text, Pressable, Platform, TextInput, KeyboardAvoidingView, Animated } from 'react-native';
+import { View, Text, Pressable, Platform, TextInput, KeyboardAvoidingView, Animated, PixelRatio } from 'react-native';
 import type { AppStateStatus } from 'react-native';
 import { CalendarList } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
@@ -21,7 +21,7 @@ import {
   DAY_FONT,
   MONTH_TITLE_HEIGHT,
   ROWS,
-  FIRST_DAY,
+  FIRST_DAY as FIRST_DAY_FALLBACK,
   PROFILE_ICON_SIZE,
 } from './CalendarParts';
 
@@ -40,39 +40,82 @@ import { CALENDARS } from '../store/seeds';
 type Props = NativeStackScreenProps<RootStackParamList, 'Calendar'>;
 type SortMode = 'span' | 'start';
 
-const ORGS: EntityItem[] = [
-  { id: 'org_me',   label: 'My Schedule', emoji: '🙂',           kind: 'me'   },
-  { id: 'org_fam',  label: 'Family',      emoji: '👨‍👩‍👧‍👦', kind: 'org'  },
-  { id: 'org_team', label: 'Team',        emoji: '👥',           kind: 'org'  },
+// ===== 新スキーマ: ローダ =====
+type ServerDocV2 = {
+  version: number;
+  profile?: {
+    current_user_id?: string;
+    default_tz?: string;
+    locale?: string;
+    profile_image_path?: string | null;
+    username?: string | null;
+    username_url?: string | null;
+    display_name?: string | null;
+    email?: string | null;
+    updated_at?: string;
+  };
+  entities?: {
+    organizations?: Record<string, { org_id: string; name: string; plan?: string; locale?: string; tz?: string }>;
+    follows?: Record<string, { user_id: string; display_name?: string; profile_image_path?: string | null }>;
+    groups?: Record<string, {
+      group_id: string; owner_org_id?: string | null; owner_user_id?: string | null; name: string;
+      updated_at?: string;
+      members?: Record<string, { user_id: string; name?: string; role?: string; can_share?: string | boolean; can_invite?: string | boolean; }>;
+    }>;
+  };
+  sync?: unknown;
+  tombstones?: unknown;
+};
+
+type ClientPrefsV1 = {
+  version: number;
+  meta?: { updated_at?: string; app_version?: string; device_id?: string };
+  display?: { week_start?: 'mon' | 'sun'; theme?: 'light'|'dark'|'system'; time_format?: '24h'|'12h' };
+  calendars?: Record<string, {
+    background_image?: string | null;
+    event_style_default?: { font_family?: string; font_color?: string; background_color?: string; border_color?: string };
+    overlays?: Array<{ calendar_id: string; event_filters?: unknown }>;
+  }>;
+};
+
+async function loadAppData(): Promise<{ server?: ServerDocV2; prefs?: ClientPrefsV1 }> {
+  try {
+    const m: any = await import('../store/appData');
+    if (typeof m?.getAppData === 'function') return m.getAppData();
+    if (m?.default && (m.default.server || m.default.prefs)) return m.default;
+    return { server: m.server, prefs: m.prefs };
+  } catch {
+    return {};
+  }
+}
+
+// ===== 旧ハードコード（フォールバック） =====
+const ORGS_FALLBACK: EntityItem[] = [
+  { id: 'org_me',   label: 'My Schedule', emoji: '🙂', kind: 'me' },
+  { id: 'org_fam',  label: 'Family',      emoji: '👨‍👩‍👧‍👦', kind: 'org' },
+  { id: 'org_team', label: 'Team',        emoji: '👥', kind: 'org' },
 ];
 
-const GROUPS_BY_ORG: Record<string, EntityItem[]> = {
-  org_me:   [ { id: 'grp_me_private', label: 'Private',   emoji: '🔒', kind: 'group' } ],
-  org_fam:  [
+const GROUPS_BY_ORG_FALLBACK: Record<string, EntityItem[]> = {
+  org_me:  [ { id: 'grp_me_private', label: 'Private', emoji: '🔒', kind: 'group' } ],
+  org_fam: [
     { id: 'grp_fam_all',     label: 'All Members', emoji: '🏠', kind: 'group' },
     { id: 'grp_fam_parents', label: 'Parents',     emoji: '🧑‍🧑‍🧒', kind: 'group' },
   ],
   org_team: [
-    { id: 'grp_team_all',  label: 'All Hands',  emoji: '🗓️', kind: 'group' },
-    { id: 'grp_team_dev',  label: 'Developers', emoji: '💻', kind: 'group' },
-    { id: 'grp_team_des',  label: 'Designers',  emoji: '🎨', kind: 'group' },
+    { id: 'grp_team_all', label: 'All Hands', emoji: '🗓️', kind: 'group' },
+    { id: 'grp_team_dev', label: 'Developers', emoji: '💻', kind: 'group' },
+    { id: 'grp_team_des', label: 'Designers',  emoji: '🎨', kind: 'group' },
   ],
 };
 
-const FOLLOWS: EntityItem[] = [
+const FOLLOWS_FALLBACK: EntityItem[] = [
   { id: 'u1', label: 'Alice', emoji: '🧑‍💻', kind: 'user' },
   { id: 'u2', label: 'Bob',   emoji: '🎨',   kind: 'user' },
   { id: 'u3', label: 'Chris', emoji: '🎸',   kind: 'user' },
 ];
 
-const DRAWER_W = Math.floor(Math.min(360, SCREEN_W * 0.84));
-const PROFILE_DRAWER_W = Math.floor(Math.min(360, SCREEN_W * 0.9));
-const PROFILE_EMOJI = '🙂';
-
-const ROW_HEIGHT = 64;
-const PAGE = 50;
-
-// 小さな状態バッジ
+// 状態バッジ
 function StatusBadge({ text }: { text: string }) {
   return (
     <View style={{
@@ -80,27 +123,77 @@ function StatusBadge({ text }: { text: string }) {
       backgroundColor: '#0f172a', paddingHorizontal: 10, paddingVertical: 6,
       borderRadius: 9999, borderWidth: HAIR_SAFE, borderColor: '#0b1222',
       shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
-      elevation: 4,
-      zIndex: 10,
+      elevation: 4, zIndex: 10,
     }}>
       <Text style={{ color: 'white', fontSize: 12, fontWeight: '700' }}>{text}</Text>
     </View>
   );
 }
 
-// EventInstance -> DayCell で必要な形（EventSegment風）へ変換
+// EventInstance -> DayCell 変換（最小）
 type EventSegmentMinimal = EventInstance & { spanLeft: boolean; spanRight: boolean };
-const toLocalSegment = (ev: EventInstance): EventSegmentMinimal => ({
-  ...ev,
-  spanLeft: false,
-  spanRight: false,
-});
+const toLocalSegment = (ev: EventInstance): EventSegmentMinimal => ({ ...ev, spanLeft: false, spanRight: false });
 
-// ★ EventInstanceの重複判定用キー（idが無い型でも安定）
+// 重複キー
 const dedupeKey = (ev: EventInstance) =>
   `${String(ev.calendar_id ?? '')}|${String(ev.title ?? '')}|${String(ev.start_at ?? '')}|${String(ev.end_at ?? '')}`;
 
 export default function CalendarScreen({ navigation }: Props) {
+  // ===== 新スキーマロード =====
+  const [{ server, prefs }, setAppData] = useState<{ server?: ServerDocV2; prefs?: ClientPrefsV1 }>({});
+  const [schemaReady, setSchemaReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const loaded = await loadAppData();
+      if (!alive) return;
+      setAppData(loaded);
+      setSchemaReady(true);
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  // ■ UI用マッピング
+  const ORGS: EntityItem[] = useMemo(() => {
+    const list: EntityItem[] = [];
+    const displayName = server?.profile?.display_name || 'My Schedule';
+    list.push({ id: 'org_me', label: displayName, emoji: '🙂', kind: 'me' });
+
+    const orgs = Object.values(server?.entities?.organizations ?? {});
+    for (const o of orgs) {
+      list.push({ id: o.org_id, label: o.name, emoji: '🏢', kind: 'org' });
+    }
+    return list.length ? list : ORGS_FALLBACK;
+  }, [server]);
+
+  const GROUPS_BY_ORG: Record<string, EntityItem[]> = useMemo(() => {
+    const map: Record<string, EntityItem[]> = {};
+    map['org_me'] = [{ id: 'grp_me_private', label: 'Private', emoji: '🔒', kind: 'group' }];
+
+    const groups = Object.values(server?.entities?.groups ?? {});
+    for (const g of groups) {
+      const ownerOrg = g.owner_org_id || 'org_me';
+      (map[ownerOrg] ||= []).push({ id: g.group_id, label: g.name, emoji: '👥', kind: 'group' });
+    }
+    return Object.keys(map).length ? map : GROUPS_BY_ORG_FALLBACK;
+  }, [server]);
+
+  const FOLLOWS: EntityItem[] = useMemo(() => {
+    const follows = Object.values(server?.entities?.follows ?? {}).map(f => ({
+      id: f.user_id, label: f.display_name || f.user_id, emoji: '👤', kind: 'user' as const
+    }));
+    return follows.length ? follows : FOLLOWS_FALLBACK;
+  }, [server]);
+
+  // 週開始
+  const FIRST_DAY = useMemo(() => {
+    const wk = prefs?.display?.week_start;
+    if (wk === 'mon') return 1;
+    if (wk === 'sun') return 0;
+    return FIRST_DAY_FALLBACK;
+  }, [prefs]);
+
+  // ===== 以降は従来ロジック =====
   const today = dayjs().format('YYYY-MM-DD');
   const [selected, setSelected] = useState<string>(today);
   const [currentMonth, setCurrentMonth] = useState<string>(dayjs().format('YYYY-MM'));
@@ -111,7 +204,7 @@ export default function CalendarScreen({ navigation }: Props) {
     () =>
       [...ORGS, ...Object.values(GROUPS_BY_ORG).flat(), ...FOLLOWS].find((x) => x.id === selectedEntityId) ??
       ORGS[0],
-    [selectedEntityId]
+    [selectedEntityId, ORGS, GROUPS_BY_ORG, FOLLOWS]
   );
   const [expandedOrgId, setExpandedOrgId] = useState<string | null>('org_me');
 
@@ -124,9 +217,14 @@ export default function CalendarScreen({ navigation }: Props) {
   const [localLoaded, setLocalLoaded] = useState(false);
   const [dbReady, setDbReady] = useState(false);
 
+  // ✅ 同期中フラグ & 一度だけ行うためのRef
+  const [syncing, setSyncing] = useState(false);
+  const hasSyncedRef = useRef(false);
+  const SYNC_TIMEOUT_MS = 2500; // ← ここでタイムアウト時間を調整できます
+
   // ドロワー
-  const left = useAnimatedDrawer(DRAWER_W, 'left');
-  const right = useAnimatedDrawer(PROFILE_DRAWER_W, 'right');
+  const left = useAnimatedDrawer(Math.floor(Math.min(360, SCREEN_W * 0.84)), 'left');
+  const right = useAnimatedDrawer(Math.floor(Math.min(360, SCREEN_W * 0.9)), 'right');
 
   // 日別イベントシート
   const [sheetVisible, setSheetVisible] = useState(false);
@@ -149,7 +247,7 @@ export default function CalendarScreen({ navigation }: Props) {
   const [formStart, setFormStart] = useState<string>(dayjs().format('YYYY-MM-DD HH:mm'));
   const [formEnd, setFormEnd] = useState<string>(dayjs().add(1, 'hour').format('YYYY-MM-DD HH:mm'));
 
-  // 初期カレンダー選択を安全に決定
+  // 初期カレンダー
   const [formCalId, setFormCalId] = useState<string>(() => {
     const list = Array.isArray(CALENDARS) ? CALENDARS : [];
     return (
@@ -162,31 +260,30 @@ export default function CalendarScreen({ navigation }: Props) {
   // ローカルイベント（日付別）
   const [localByDate, setLocalByDate] = useState<Record<string, EventInstance[]>>({});
 
-  // ★ 二重保存ロック（UIと同期的ガード）
+  // 二重保存ロック
   const [isSaving, setIsSaving] = useState(false);
   const savingRef = useRef(false);
 
   const initialCurrent = useRef(dayjs().startOf('month').format('YYYY-MM-DD')).current;
 
-  // セル高さ
-  const cellH = useMemo(() => {
-    if (gridH <= 0 || weekHeaderH <= 0) return 0;
-    const usable = gridH - MONTH_TITLE_HEIGHT - weekHeaderH;
-    const per = Math.max(28, Math.floor(usable / ROWS));
-    return Math.floor(per);
+  // ページ高さ→行高さ
+  const pageHeight = useMemo(() => {
+    if (gridH <= 0) return 0;
+    const weekH = Math.max(weekHeaderH, 24);
+    const usable = Math.max(0, gridH - MONTH_TITLE_HEIGHT - weekH);
+    return Math.round(PixelRatio.roundToNearestPixel(usable));
   }, [gridH, weekHeaderH]);
 
-  // カレンダーBody高さ
-  const calendarBodyH = useMemo(() => {
-    if (cellH <= 0) return 0;
-    return Math.floor(cellH * ROWS);
-  }, [cellH]);
+  const cellH = useMemo(() => {
+    if (pageHeight <= 0) return 0;
+    return Math.floor(pageHeight / ROWS);
+  }, [pageHeight]);
 
-  // CalendarList を描画可能に（初回ペイントを待たない）
+  // CalendarList 可否
   const [calReady, setCalReady] = useState(false);
   useEffect(() => {
-    setCalReady(innerW > 0 && cellH > 0);
-  }, [innerW, cellH]);
+    setCalReady(innerW > 0 && pageHeight > 0);
+  }, [innerW, pageHeight]);
 
   // ==== 月ヘッダ切替：デバウンス ====
   const monthDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -199,14 +296,7 @@ export default function CalendarScreen({ navigation }: Props) {
       setCurrentMonth((prev) => (prev === key ? prev : key));
     }, 80);
   }, []);
-  useEffect(() => {
-    return () => {
-      if (monthDebounceRef.current) {
-        clearTimeout(monthDebounceRef.current);
-        monthDebounceRef.current = null;
-      }
-    };
-  }, []);
+  useEffect(() => () => { if (monthDebounceRef.current) clearTimeout(monthDebounceRef.current); }, []);
 
   // 列幅
   const colWBase = useMemo(() => (innerW > 0 ? Math.floor(innerW / 7) : 0), [innerW]);
@@ -219,7 +309,7 @@ export default function CalendarScreen({ navigation }: Props) {
       return (GROUPS_BY_ORG[selectedEntity.id] ?? []).map((g) => g.id);
     }
     return [];
-  }, [selectedEntity]);
+  }, [selectedEntity, GROUPS_BY_ORG]);
 
   const filterEventsByEntity = useCallback((listRaw: any[]) => {
     const visibleGroupIds = getVisibleGroupIds();
@@ -235,7 +325,7 @@ export default function CalendarScreen({ navigation }: Props) {
     });
   }, [getVisibleGroupIds, selectedEntity]);
 
-  // ==== 月データ（DB側）は dbReady になるまで止める ====
+  // ==== 月データ（DB側）は dbReady まで停止 ====
   const deferredMonth = useDeferredValue(currentMonth);
   const monthDates = useMemo(() => getMonthRangeDates(deferredMonth), [deferredMonth]);
   const enabledMonthDates = dbReady ? monthDates : [];
@@ -245,83 +335,83 @@ export default function CalendarScreen({ navigation }: Props) {
     sortMode
   );
 
-  // 1) 画面描画 → 2) ローカル読み込み（イベント期間だけをループ＝線形化）
+  // ローカル読み込み（ calReady を待たない ）
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      if (!calReady) return;
       await new Promise<void>((r) => requestAnimationFrame(() => r()));
-
       const list = await loadLocalEvents();
-
-      // 当月の先頭/末尾（ローカル日付）
       if (monthDates.length === 0) return;
       const monthStart = startOfLocalDay(monthDates[0]);
       const monthEnd   = endOfLocalDay(monthDates[monthDates.length - 1]);
-
       const map: Record<string, EventInstance[]> = {};
-
       for (const ev of list) {
-        const s = fromUTC(ev.start_at);
-        const e = fromUTC(ev.end_at);
-
-      // この月にかかる区間にクリップ
+        const s = fromUTC(ev.start_at); const e = fromUTC(ev.end_at);
         const clipStart = s.isAfter(monthStart) ? s : monthStart;
         const clipEnd   = e.isBefore(monthEnd) ? e : monthEnd;
         if (clipEnd.isBefore(clipStart)) continue;
-
-        // その期間の日付だけを回す（最大でも実在する日数分）
-        let d = clipStart.startOf('day');
-        const endDay = clipEnd.startOf('day');
+        let d = clipStart.startOf('day'); const endDay = clipEnd.startOf('day');
         while (d.isBefore(endDay) || d.isSame(endDay)) {
-          const key = d.format('YYYY-MM-DD');
-          (map[key] ||= []).push(ev);
-          d = d.add(1, 'day');
+          const key = d.format('YYYY-MM-DD'); (map[key] ||= []).push(ev); d = d.add(1, 'day');
         }
       }
-
-      if (!cancelled) {
-        setLocalByDate(map);
-        setLocalLoaded(true);
-      }
+      if (!cancelled) { setLocalByDate(map); setLocalLoaded(true); }
     };
     run();
     return () => { cancelled = true; setLocalLoaded(false); };
-  }, [calReady, deferredMonth, monthDates]);
+  }, [deferredMonth, monthDates]);
 
-  // 3) ローカル読み込み完了 → DB同期（当月＋前後月）
+  // ===== DB同期（タイムアウトで中断・一度だけ） =====
   useEffect(() => {
-    if (!localLoaded) return;
-    let alive = true;
+    if (!localLoaded || hasSyncedRef.current) return;
+
+    let cancelled = false;
+    let timeoutId: any = null;
+
+    setSyncing(true);
+
     (async () => {
       try {
-        type MonthShardModule = {
-          ensureMonthLoaded?: (month: string) => Promise<void>;
-          ensureMonthsLoaded?: (months: string[]) => Promise<void>;
-        };
-        const mod = (await import('../store/monthShard').catch(() => null)) as MonthShardModule | null;
+        const mod = (await import('../store/monthShard').catch(() => null)) as
+          | { ensureMonthLoaded?: (m: string)=>Promise<void>; ensureMonthsLoaded?: (ms: string[])=>Promise<void> }
+          | null;
 
         const center = dayjs(currentMonth + '-01');
         const months = [
-          center.subtract(1, 'month').format('YYYY-MM'),
+          center.subtract(1,'month').format('YYYY-MM'),
           center.format('YYYY-MM'),
-          center.add(1, 'month').format('YYYY-MM'),
+          center.add(1,'month').format('YYYY-MM')
         ];
 
-        // ローカル描画が見えた直後に少し間を置いてから同期開始（体感改善）
-        await new Promise<void>(r => setTimeout(() => r(), 120));
+        const ensurePromise =
+          mod?.ensureMonthsLoaded ? mod.ensureMonthsLoaded(months) :
+          mod?.ensureMonthLoaded  ? Promise.all(months.map(m => mod.ensureMonthLoaded!(m))) :
+          Promise.resolve();
 
-        if (mod?.ensureMonthsLoaded) {
-          await mod.ensureMonthsLoaded(months);
-        } else if (mod?.ensureMonthLoaded) {
-          await Promise.all(months.map(m => mod.ensureMonthLoaded!(m)));
+        // タイムアウト：SYNC_TIMEOUT_MS 経過で打ち切り
+        const timeoutPromise = new Promise<void>((resolve) => {
+          timeoutId = setTimeout(resolve, SYNC_TIMEOUT_MS);
+        });
+
+        await Promise.race([ensurePromise, timeoutPromise]);
+
+        if (!cancelled) {
+          hasSyncedRef.current = true;
+          setDbReady(true);
+          setSyncing(false);
         }
-        if (alive) setDbReady(true);
       } catch {
-        if (alive) setDbReady(true); // 失敗してもUIは進める
+        if (!cancelled) {
+          hasSyncedRef.current = true;
+          setDbReady(true);
+          setSyncing(false);
+        }
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
       }
     })();
-    return () => { alive = false; setDbReady(false); };
+
+    return () => { cancelled = true; if (timeoutId) clearTimeout(timeoutId); };
   }, [localLoaded, currentMonth]);
 
   // ヘッダ
@@ -338,19 +428,12 @@ export default function CalendarScreen({ navigation }: Props) {
     );
     const headerRight = () => (
       <Pressable onPress={right.openDrawer} hitSlop={10} style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
-        <View
-          style={{
-            width: PROFILE_ICON_SIZE + 8,
-            height: PROFILE_ICON_SIZE + 8,
-            borderRadius: (PROFILE_ICON_SIZE + 8) / 2,
-            backgroundColor: '#f1f5f9',
-            borderWidth: HAIR_SAFE,
-            borderColor: '#e5e7eb',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Text style={{ fontSize: 18 }}>{PROFILE_EMOJI}</Text>
+        <View style={{
+          width: PROFILE_ICON_SIZE + 8, height: PROFILE_ICON_SIZE + 8,
+          borderRadius: (PROFILE_ICON_SIZE + 8) / 2, backgroundColor: '#f1f5f9',
+          borderWidth: HAIR_SAFE, borderColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Text style={{ fontSize: 18 }}>🙂</Text>
         </View>
       </Pressable>
     );
@@ -361,7 +444,7 @@ export default function CalendarScreen({ navigation }: Props) {
         <View style={styles.headerTitleRow}>
           {showEmoji ? (
             <View style={styles.headerEmojiCircle}>
-              <Text style={styles.headerEmojiText}>{selectedEntity.emoji}</Text>
+              <Text style={styles.headerEmojiText}>👥</Text>
             </View>
           ) : null}
           <Text style={styles.headerTitleText} numberOfLines={1}>
@@ -376,155 +459,106 @@ export default function CalendarScreen({ navigation }: Props) {
 
   const marked = useMemo(() => ({ [selected]: { selected: true } }), [selected]);
 
-  // 日別シート：DB準備できていない間はローカルのみで表示
+  // 日別シート
   const openSheet = useCallback((dateStr: string) => {
     setSheetDate(dateStr);
     const dbList = dbReady ? (listInstancesByDate(dateStr) ?? []) : [];
-    const merged = [
-      ...(localByDate[dateStr] ?? []),
-      ...filterEventsByEntity(dbList),
-    ];
-    setSheetItems(merged.slice(0, PAGE));
+    const merged = [ ...(localByDate[dateStr] ?? []), ...filterEventsByEntity(dbList) ];
+    setSheetItems(merged.slice(0, 50));
     setSheetVisible(true);
-
     requestAnimationFrame(() => {
-      sheetY.stopAnimation();
-      sheetY.setValue(SHEET_H);
-      Animated.timing(sheetY, {
-        toValue: 0,
-        duration: 260,
-        useNativeDriver: true,
-      }).start();
+      sheetY.stopAnimation(); sheetY.setValue(SHEET_H);
+      Animated.timing(sheetY, { toValue: 0, duration: 260, useNativeDriver: true }).start();
     });
   }, [filterEventsByEntity, sheetY, SHEET_H, localByDate, dbReady]);
 
   const closeSheet = useCallback(() => {
     sheetY.stopAnimation();
-    Animated.timing(sheetY, { toValue: SHEET_H, duration: 220, useNativeDriver: true })
-      .start(() => setSheetVisible(false));
+    Animated.timing(sheetY, { toValue: SHEET_H, duration: 220, useNativeDriver: true }).start(() => setSheetVisible(false));
   }, [sheetY, SHEET_H]);
 
-  const handleDayPress = useCallback((d: DateData) => {
-    setSelected(d.dateString);
-    openSheet(d.dateString);
-  }, [openSheet]);
+  const handleDayPress = useCallback((d: DateData) => { setSelected(d.dateString); openSheet(d.dateString); }, [openSheet]);
 
   const onEndReached = useCallback(() => {
     setSheetItems((prev) => {
       const dbList = dbReady ? (listInstancesByDate(sheetDate) ?? []) : [];
-      const all = [
-        ...(localByDate[sheetDate] ?? []),
-        ...filterEventsByEntity(dbList),
-      ];
+      const all = [ ...(localByDate[sheetDate] ?? []), ...filterEventsByEntity(dbList) ];
       if (prev.length >= all.length) return prev;
-      const nextLen = Math.min(prev.length + PAGE, all.length);
+      const nextLen = Math.min(prev.length + 50, all.length);
       return all.slice(0, nextLen);
     });
   }, [sheetDate, filterEventsByEntity, localByDate, dbReady]);
 
-  // CalendarList の内部ヘッダーは使わないので高さ 0 にする
-  const calendarTheme: any = useMemo(
-    () => ({
-      textDayFontSize: DAY_FONT,
-      textDayFontWeight: '700',
-      textMonthFontSize: 20,
-      textMonthFontWeight: '800',
-      'stylesheet.calendar.main': {
-        container: { paddingLeft: 0, paddingRight: 0, paddingTop: 0 },
-        monthView: { paddingHorizontal: 0, paddingTop: 0, marginTop: 0 },
-        week: {
-          marginTop: 0, marginBottom: 0, padding: 0,
-          flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'stretch',
-        },
-        dayContainer: { flex: 0, padding: 0, margin: 0, alignItems: 'flex-start', justifyContent: 'flex-start', width: undefined },
-      },
-      'stylesheet.day.basic': {
-        base: { flex: 0, width: undefined, margin: 0, padding: 0, alignItems: 'stretch', justifyContent: 'flex-start' },
-      },
-      'stylesheet.calendar-list.main': { calendar: { paddingLeft: 0, paddingRight: 0, paddingTop: 0, marginTop: 0 } },
-      'stylesheet.calendar.header': { header: { marginBottom: 0, paddingVertical: 0, height: 0 } },
-    }),
-    []
-  );
+  // CalendarList テーマ
+  const calendarTheme: any = useMemo(() => ({
+    textDayFontSize: DAY_FONT,
+    textDayFontWeight: '700',
+    textMonthFontSize: 20,
+    textMonthFontWeight: '800',
+    'stylesheet.calendar.main': {
+      container: { paddingLeft: 0, paddingRight: 0, paddingTop: 0 },
+      monthView: { paddingHorizontal: 0, paddingTop: 0, marginTop: 0 },
+      week: { marginTop: 0, marginBottom: 0, padding: 0, flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'stretch' },
+      dayContainer: { flex: 0, padding: 0, margin: 0, alignItems: 'flex-start', justifyContent: 'flex-start', width: undefined },
+    },
+    'stylesheet.day.basic': { base: { flex: 0, width: undefined, margin: 0, padding: 0, alignItems: 'stretch', justifyContent: 'flex-start' } },
+    'stylesheet.calendar-list.main': { calendar: { paddingLeft: 0, paddingRight: 0, paddingTop: 0, marginTop: 0 } },
+    'stylesheet.calendar.header': { header: { marginBottom: 0, paddingVertical: 0, height: 0 } },
+  }), []);
 
-  // DayCell レンダラ（DBは dbReady の時だけ合流）
+  // DayCell
   const renderDay = useCallback(
     ({ date, state, marking, onPress }: any) => {
       const dateStr = date?.dateString as string;
-
-      // DB側（EventSegment[]）
       const dbSegs = dbReady ? (eventsByDate[dateStr] ?? []) : [];
-
-      // ローカル側（EventInstance[] -> EventSegment風に変換）
       const localSegs = (localByDate[dateStr] ?? []).map(toLocalSegment);
-
-      const merged = [
-        ...dbSegs,
-        ...localSegs,
-      ] as any[]; // DayCell 側の型に合わせる（spanLeft/spanRight は付与済み）
-
+      const merged = [ ...dbSegs, ...localSegs ] as any[];
       const moreLocal = localSegs.length;
       const moreDb    = dbReady ? (overflowByDate[dateStr] ?? 0) : 0;
-
       return (
-        <DayCell
-          date={date}
-          state={state}
-          marking={marking}
-          onPress={onPress}
-          colWBase={colWBase}
-          colWLast={colWLast}
-          cellH={cellH}
-          dayEvents={merged}
-          hideRightDivider={hideRightDividerDays.has(dateStr)}
-          moreCount={moreDb + moreLocal}
-        />
+        <View style={{ height: cellH, overflow: 'hidden' }}>
+          <DayCell
+            date={date}
+            state={state}
+            marking={marking}
+            onPress={onPress}
+            colWBase={colWBase}
+            colWLast={colWLast}
+            cellH={cellH}
+            dayEvents={merged}
+            hideRightDivider={hideRightDividerDays.has(dateStr)}
+            moreCount={moreDb + moreLocal}
+          />
+        </View>
       );
     },
     [colWBase, colWLast, cellH, eventsByDate, hideRightDividerDays, overflowByDate, localByDate, dbReady]
   );
 
-  /* =========================
-   * 先読み（任意）
-   * =========================*/
+  // 先読み
   const visitedMonthsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!dbReady) return; // DB準備前は先読みを止めて同時IOを避ける
+    if (!dbReady) return;
     const run = async () => {
       const m0 = dayjs(currentMonth + '-01');
       const months = [-2, -1, 1, 2].map((off) => m0.add(off, 'month').format('YYYY-MM'));
       const targets = months.filter((m) => !visitedMonthsRef.current.has(m));
       if (targets.length === 0) return;
-
       const { InteractionManager } = require('react-native');
-      await new Promise<void>((resolve) => {
-        InteractionManager.runAfterInteractions(() => resolve());
-      });
-
+      await new Promise<void>((resolve) => { InteractionManager.runAfterInteractions(() => resolve()); });
       try {
-        type MonthShardModule = {
-          ensureMonthsLoaded?: (months: string[]) => Promise<void>;
-          ensureMonthLoaded?: (month: string) => Promise<void>;
-        };
-        const mod = (await import('../store/monthShard').catch(() => null)) as MonthShardModule | null;
-
-        if (mod?.ensureMonthsLoaded) {
-          await mod.ensureMonthsLoaded(targets);
-        } else if (mod?.ensureMonthLoaded) {
-          await Promise.all(targets.map((m) => mod.ensureMonthLoaded!(m)));
-        } else {
-          return;
-        }
+        const mod = (await import('../store/monthShard').catch(() => null)) as
+          | { ensureMonthLoaded?: (m: string)=>Promise<void>; ensureMonthsLoaded?: (ms: string[])=>Promise<void> }
+          | null;
+        if (mod?.ensureMonthsLoaded) await mod.ensureMonthsLoaded(targets);
+        else if (mod?.ensureMonthLoaded) await Promise.all(targets.map((m) => mod.ensureMonthLoaded!(m)));
         targets.forEach((t) => visitedMonthsRef.current.add(t));
-        if (__DEV__) console.log('[prefetch] months loaded:', targets.join(', '));
-      } catch (e) {
-        if (__DEV__) console.warn('[prefetch] failed:', e);
-      }
+      } catch {}
     };
     run();
   }, [currentMonth, dbReady]);
 
-  // iOS 復帰時の軽い先読み
+  // iOS 復帰先読み
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
     const { AppState } = require('react-native');
@@ -544,25 +578,21 @@ export default function CalendarScreen({ navigation }: Props) {
     return () => sub.remove();
   }, [currentMonth]);
 
-  // 使い方 / テスト投入
   const openHelp = useCallback(() => {
     setHelpVisible(true);
     requestAnimationFrame(() => {
-      helpSheetY.stopAnimation();
-      helpSheetY.setValue(HELP_SHEET_H);
+      helpSheetY.stopAnimation(); helpSheetY.setValue(HELP_SHEET_H);
       Animated.timing(helpSheetY, { toValue: 0, duration: 260, useNativeDriver: true }).start();
     });
   }, [helpSheetY, HELP_SHEET_H]);
-
   const closeHelp = useCallback(() => {
     helpSheetY.stopAnimation();
-    Animated.timing(helpSheetY, { toValue: HELP_SHEET_H, duration: 220, useNativeDriver: true })
-      .start(() => setHelpVisible(false));
+    Animated.timing(helpSheetY, { toValue: HELP_SHEET_H, duration: 220, useNativeDriver: true }).start(() => setHelpVisible(false));
   }, [helpSheetY, HELP_SHEET_H]);
 
   const injectTestEventsForThisMonth = useCallback(async () => {
     const monthStart = dayjs(currentMonth + '-01');
-    const samples: Array<{ day: number; title: string; start: string; end: string }> = [
+    const samples = [
       { day: 3,  title: 'Test: Standup',    start: '10:00', end: '10:30' },
       { day: 7,  title: 'Test: 1on1',       start: '14:00', end: '14:30' },
       { day: 12, title: 'Test: Design Mtg', start: '11:00', end: '12:00' },
@@ -571,7 +601,6 @@ export default function CalendarScreen({ navigation }: Props) {
     ];
     const cal = (Array.isArray(CALENDARS) ? CALENDARS : []).find(c => c?.calendar_id === formCalId);
     const color = cal?.color ?? undefined;
-
     const created: Array<{ inst: EventInstance; dStr: string }> = [];
     for (const smp of samples) {
       const d = monthStart.date(smp.day);
@@ -580,26 +609,22 @@ export default function CalendarScreen({ navigation }: Props) {
       const inst = await saveLocalEvent({ calendar_id: formCalId, title: smp.title, startLocalISO, endLocalISO, color });
       created.push({ inst, dStr: d.format('YYYY-MM-DD') });
     }
-
-    setLocalByDate(prev => {
-      const next = { ...prev };
-      for (const { inst, dStr } of created) (next[dStr] ||= []).push(inst);
-      return next;
-    });
-
+    setLocalByDate(prev => { const next = { ...prev }; for (const { inst, dStr } of created) (next[dStr] ||= []).push(inst); return next; });
     if (sheetVisible) {
       const addedForSheet = created.filter(x => x.dStr === sheetDate).map(x => x.inst);
       if (addedForSheet.length > 0) setSheetItems(prev => [...addedForSheet, ...prev]);
     }
-
     closeHelp();
   }, [currentMonth, formCalId, sheetDate, sheetVisible, closeHelp]);
 
   return (
     <View style={styles.container}>
-      {/* ステータスバッジ（段階進行を表示） */}
-      {!localLoaded && <StatusBadge text="Loading local events…" />}
-      {localLoaded && !dbReady && <StatusBadge text="Syncing with server…" />}
+      {/* スキーマ読み込み中バッジ */}
+      {!schemaReady && <StatusBadge text="Loading profile & entities…" />}
+
+      {/* ステータスバッジ */}
+      {schemaReady && !localLoaded && <StatusBadge text="Load events…" />}
+      {schemaReady && localLoaded && syncing && <StatusBadge text="Sync server…" />}
 
       {/* カレンダー */}
       <View style={styles.gridBlock} onLayout={(e) => setGridH(e.nativeEvent.layout.height)}>
@@ -609,10 +634,10 @@ export default function CalendarScreen({ navigation }: Props) {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <Text style={styles.monthTitle}>{dayjs(currentMonth + '-01').format('YYYY MMM')}</Text>
               <View style={styles.sortPills}>
-                <Pressable onPress={() => setSortMode('span')} style={[styles.pill, sortMode === 'span' && styles.pillActive]}>
-                  <Text style={[styles.pillText, sortMode === 'span' && styles.pillTextActive]}>Span</Text>
+                <Pressable onPress={() => setSortMode('span')}  style={[styles.pill,  sortMode === 'span'  && styles.pillActive]}>
+                  <Text style={[styles.pillText, sortMode === 'span'  && styles.pillTextActive]}>Span</Text>
                 </Pressable>
-                <Pressable onPress={() => setSortMode('start')} style={[styles.pill, sortMode === 'start' && styles.pillActive]}>
+                <Pressable onPress={() => setSortMode('start')} style={[styles.pill,  sortMode === 'start' && styles.pillActive]}>
                   <Text style={[styles.pillText, sortMode === 'start' && styles.pillTextActive]}>Start</Text>
                 </Pressable>
               </View>
@@ -626,20 +651,20 @@ export default function CalendarScreen({ navigation }: Props) {
 
           {/* CalendarList */}
           <View style={{ overflow: 'hidden' }}>
-            {calReady && weekHeaderH > 0 && (
+            {(pageHeight > 0 && innerW > 0) && (
               <CalendarList
-                key={`${innerW}x${cellH}x${weekHeaderH}`}
+                key={`${innerW}x${cellH}x${weekHeaderH}x${pageHeight}x${FIRST_DAY}`}
                 firstDay={FIRST_DAY}
                 current={initialCurrent}
                 horizontal={false}
                 pagingEnabled
                 hideDayNames
                 renderHeader={() => null}
-                style={{ height: calendarBodyH }}
+                style={{ height: pageHeight }}
                 calendarStyle={{ paddingTop: 0, marginTop: 0 }}
-                calendarHeight={calendarBodyH}
-                pastScrollRange={12}
-                futureScrollRange={12}
+                calendarHeight={pageHeight}
+                pastScrollRange={120}
+                futureScrollRange={120}
                 minDate={'1900-01-01'}
                 maxDate={'2100-12-31'}
                 hideExtraDays={false}
@@ -648,7 +673,6 @@ export default function CalendarScreen({ navigation }: Props) {
                 onVisibleMonthsChange={onVisibleMonthsChange}
                 markedDates={marked}
                 showScrollIndicator={false}
-                removeClippedSubviews
                 theme={calendarTheme as any}
                 contentContainerStyle={{ alignItems: 'flex-start', paddingHorizontal: 0, paddingTop: 0 }}
                 dayComponent={renderDay as any}
@@ -661,7 +685,7 @@ export default function CalendarScreen({ navigation }: Props) {
       {/* 左ドロワー */}
       <LeftDrawer
         open={left.open}
-        width={DRAWER_W}
+        width={Math.floor(Math.min(360, SCREEN_W * 0.84))}
         translateX={left.x}
         selectedEntityId={selectedEntityId}
         setSelectedEntityId={setSelectedEntityId}
@@ -676,10 +700,10 @@ export default function CalendarScreen({ navigation }: Props) {
       {/* 右ドロワー */}
       <ProfileDrawer
         open={right.open}
-        width={PROFILE_DRAWER_W}
+        width={Math.floor(Math.min(360, SCREEN_W * 0.9))}
         translateX={right.x}
         close={right.closeDrawer}
-        emoji={PROFILE_EMOJI}
+        emoji="🙂"
       />
 
       {/* 日別イベントシート */}
@@ -691,7 +715,7 @@ export default function CalendarScreen({ navigation }: Props) {
         items={sheetItems}
         onClose={closeSheet}
         onEndReached={onEndReached}
-        rowHeight={ROW_HEIGHT}
+        rowHeight={64}
       />
 
       {/* 右下 ＋ FAB */}
@@ -701,61 +725,34 @@ export default function CalendarScreen({ navigation }: Props) {
           setFormStart(dayjs(selected).hour(10).minute(0).format('YYYY-MM-DD HH:mm'));
           setFormEnd(dayjs(selected).hour(11).minute(0).format('YYYY-MM-DD HH:mm'));
           const list = Array.isArray(CALENDARS) ? CALENDARS : [];
-          const safeCalId =
-            (list.find(c => c?.name?.includes('My: Private'))?.calendar_id ?? list[0]?.calendar_id) ??
-            'CAL_LOCAL_DEFAULT';
+          const safeCalId = (list.find(c => c?.name?.includes('My: Private'))?.calendar_id ?? list[0]?.calendar_id) ?? 'CAL_LOCAL_DEFAULT';
           setFormCalId(safeCalId);
           setAddVisible(true);
           requestAnimationFrame(() => {
-            addSheetY.stopAnimation();
-            addSheetY.setValue(ADD_SHEET_H);
+            addSheetY.stopAnimation(); addSheetY.setValue(ADD_SHEET_H);
             Animated.timing(addSheetY, { toValue: 0, duration: 260, useNativeDriver: true }).start();
           });
         }}
         hitSlop={10}
         style={{
-          position: 'absolute',
-          right: 18,
-          bottom: 24,
-          width: 56,
-          height: 56,
-          borderRadius: 28,
-          backgroundColor: '#111827',
-          alignItems: 'center',
-          justifyContent: 'center',
-          shadowColor: '#000',
-          shadowOpacity: 0.25,
-          shadowRadius: 8,
-          shadowOffset: { width: 0, height: 4 },
-          elevation: 6,
-          borderWidth: HAIR_SAFE,
-          borderColor: '#0f172a',
+          position: 'absolute', right: 18, bottom: 24, width: 56, height: 56, borderRadius: 28,
+          backgroundColor: '#111827', alignItems: 'center', justifyContent: 'center',
+          shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 4 },
+          elevation: 6, borderWidth: HAIR_SAFE, borderColor: '#0f172a',
         }}
       >
         <Text style={{ color: 'white', fontSize: 28, lineHeight: 28, marginTop: -2 }}>＋</Text>
       </Pressable>
 
-      {/* 左下 ？ FAB（使い方 / テスト投入） */}
+      {/* 左下 ？ FAB */}
       <Pressable
         onPress={openHelp}
         hitSlop={10}
         style={{
-          position: 'absolute',
-          left: 18,
-          bottom: 24,
-          width: 44,
-          height: 44,
-          borderRadius: 22,
-          backgroundColor: '#e5e7eb',
-          alignItems: 'center',
-          justifyContent: 'center',
-          shadowColor: '#000',
-          shadowOpacity: 0.15,
-          shadowRadius: 6,
-          shadowOffset: { width: 0, height: 3 },
-          elevation: 4,
-          borderWidth: HAIR_SAFE,
-          borderColor: '#cbd5e1',
+          position: 'absolute', left: 18, bottom: 24, width: 44, height: 44, borderRadius: 22,
+          backgroundColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center',
+          shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
+          elevation: 4, borderWidth: HAIR_SAFE, borderColor: '#cbd5e1',
         }}
       >
         <Text style={{ color: '#111827', fontSize: 20, lineHeight: 20 }}>?</Text>
@@ -764,25 +761,15 @@ export default function CalendarScreen({ navigation }: Props) {
       {/* 追加ボトムシート */}
       {addVisible && (
         <Pressable
-          onPress={() => {
-            addSheetY.stopAnimation();
-            Animated.timing(addSheetY, { toValue: ADD_SHEET_H, duration: 220, useNativeDriver: true })
-              .start(() => setAddVisible(false));
-          }}
+          onPress={() => { addSheetY.stopAnimation(); Animated.timing(addSheetY, { toValue: ADD_SHEET_H, duration: 220, useNativeDriver: true }).start(() => setAddVisible(false)); }}
           style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.2)' }}
         >
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
             <Animated.View
               style={{
-                position: 'absolute',
-                left: 0, right: 0, bottom: 0,
-                height: ADD_SHEET_H,
-                backgroundColor: 'white',
-                borderTopLeftRadius: 16,
-                borderTopRightRadius: 16,
-                borderWidth: HAIR_SAFE,
-                borderColor: '#e5e7eb',
-                padding: 16,
+                position: 'absolute', left: 0, right: 0, bottom: 0, height: ADD_SHEET_H,
+                backgroundColor: 'white', borderTopLeftRadius: 16, borderTopRightRadius: 16,
+                borderWidth: HAIR_SAFE, borderColor: '#e5e7eb', padding: 16,
                 transform: [{ translateY: addSheetY }],
               }}
             >
@@ -790,45 +777,20 @@ export default function CalendarScreen({ navigation }: Props) {
               <Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 12 }}>Add Event (Local JSON)</Text>
 
               <Text style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>Title</Text>
-              <TextInput
-                value={formTitle}
-                onChangeText={setFormTitle}
-                placeholder="e.g. Meeting"
-                style={{
-                  borderWidth: HAIR_SAFE, borderColor: '#cbd5e1', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10,
-                  fontSize: 16, marginBottom: 12,
-                }}
-              />
+              <TextInput value={formTitle} onChangeText={setFormTitle} placeholder="e.g. Meeting"
+                style={{ borderWidth: HAIR_SAFE, borderColor: '#cbd5e1', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12 }} />
 
               <Text style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>Start (YYYY-MM-DD HH:mm)</Text>
-              <TextInput
-                value={formStart}
-                onChangeText={setFormStart}
-                placeholder="2025-10-06 10:00"
-                style={{
-                  borderWidth: HAIR_SAFE, borderColor: '#cbd5e1', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10,
-                  fontSize: 16, marginBottom: 12,
-                }}
-              />
+              <TextInput value={formStart} onChangeText={setFormStart} placeholder="2025-10-06 10:00"
+                style={{ borderWidth: HAIR_SAFE, borderColor: '#cbd5e1', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12 }} />
 
               <Text style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>End (YYYY-MM-DD HH:mm)</Text>
-              <TextInput
-                value={formEnd}
-                onChangeText={setFormEnd}
-                placeholder="2025-10-06 11:00"
-                style={{
-                  borderWidth: HAIR_SAFE, borderColor: '#cbd5e1', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10,
-                  fontSize: 16, marginBottom: 12,
-                }}
-              />
+              <TextInput value={formEnd} onChangeText={setFormEnd} placeholder="2025-10-06 11:00"
+                style={{ borderWidth: HAIR_SAFE, borderColor: '#cbd5e1', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12 }} />
 
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
                 <Pressable
-                  onPress={() => {
-                    addSheetY.stopAnimation();
-                    Animated.timing(addSheetY, { toValue: ADD_SHEET_H, duration: 220, useNativeDriver: true })
-                      .start(() => setAddVisible(false));
-                  }}
+                  onPress={() => { addSheetY.stopAnimation(); Animated.timing(addSheetY, { toValue: ADD_SHEET_H, duration: 220, useNativeDriver: true }).start(() => setAddVisible(false)); }}
                   style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, backgroundColor: '#e5e7eb' }}
                 >
                   <Text style={{ fontWeight: '700' }}>Cancel</Text>
@@ -836,22 +798,13 @@ export default function CalendarScreen({ navigation }: Props) {
 
                 <Pressable
                   onPress={async () => {
-                    // ---- ★ 二重押しロック ----
-                    if (savingRef.current) return;
-                    savingRef.current = true;
-                    setIsSaving(true);
+                    if (savingRef.current) return; savingRef.current = true; setIsSaving(true);
                     try {
                       if (!formTitle.trim()) return;
-
                       const cal = (Array.isArray(CALENDARS) ? CALENDARS : []).find(c => c?.calendar_id === formCalId);
                       const inst = await saveLocalEvent({
-                        calendar_id: formCalId,
-                        title: formTitle.trim(),
-                        startLocalISO: formStart,
-                        endLocalISO: formEnd,
-                        color: cal?.color ?? undefined,
+                        calendar_id: formCalId, title: formTitle.trim(), startLocalISO: formStart, endLocalISO: formEnd, color: cal?.color ?? undefined,
                       });
-
                       const dStr = dayjs(formStart).format('YYYY-MM-DD');
                       setLocalByDate(prev => {
                         const next = { ...prev };
@@ -860,91 +813,20 @@ export default function CalendarScreen({ navigation }: Props) {
                         if (!list.some(x => dedupeKey(x) === k)) list.unshift(inst);
                         return next;
                       });
-
                       if (sheetVisible && sheetDate === dStr) {
                         const k = dedupeKey(inst);
                         setSheetItems(prev => (prev.some(x => dedupeKey(x) === k) ? prev : [inst, ...prev]));
                       }
-
-                      // 閉じるアニメーション
                       addSheetY.stopAnimation();
-                      Animated.timing(addSheetY, { toValue: ADD_SHEET_H, duration: 220, useNativeDriver: true })
-                        .start(() => setAddVisible(false));
-                    } finally {
-                      setIsSaving(false);
-                      savingRef.current = false;
-                    }
+                      Animated.timing(addSheetY, { toValue: ADD_SHEET_H, duration: 220, useNativeDriver: true }).start(() => setAddVisible(false));
+                    } finally { setIsSaving(false); savingRef.current = false; }
                   }}
                   disabled={isSaving}
-                  style={{
-                    paddingHorizontal: 16,
-                    paddingVertical: 12,
-                    borderRadius: 10,
-                    backgroundColor: isSaving ? '#9ca3af' : '#111827'
-                  }}
+                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, backgroundColor: isSaving ? '#9ca3af' : '#111827' }}
                 >
-                  <Text style={{ color: 'white', fontWeight: '700' }}>
-                    {isSaving ? 'Saving…' : 'Save'}
-                  </Text>
+                  <Text style={{ color: 'white', fontWeight: '700' }}>{isSaving ? 'Saving…' : 'Save'}</Text>
                 </Pressable>
               </View>
-            </Animated.View>
-          </KeyboardAvoidingView>
-        </Pressable>
-      )}
-
-      {/* 使い方 / テスト投入ボトムシート */}
-      {helpVisible && (
-        <Pressable
-          onPress={closeHelp}
-          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.25)' }}
-        >
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-            <Animated.View
-              style={{
-                position: 'absolute',
-                left: 0, right: 0, bottom: 0,
-                height: HELP_SHEET_H,
-                backgroundColor: 'white',
-                borderTopLeftRadius: 16,
-                borderTopRightRadius: 16,
-                borderWidth: HAIR_SAFE,
-                borderColor: '#e5e7eb',
-                padding: 16,
-                transform: [{ translateY: helpSheetY }],
-              }}
-            >
-              <View style={{ width: 42, height: 4, borderRadius: 2, backgroundColor: '#cbd5e1', alignSelf: 'center', marginBottom: 12 }} />
-              <Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 12 }}>使い方 & テスト投入</Text>
-
-              <Text style={{ color: '#475569', lineHeight: 20, marginBottom: 12 }}>
-                ・日付タップでその日の予定が開きます{'\n'}
-                ・右下「＋」でローカルJSONへ予定追加{'\n'}
-                ・追加先カレンダーは「＋」シートの丸ボタンで選択
-              </Text>
-
-              <View style={{ height: 12 }} />
-
-              <Text style={{ fontSize: 13, fontWeight: '700', marginBottom: 6 }}>▶ テストデータの投入</Text>
-              <Text style={{ color: '#6b7280', fontSize: 12, marginBottom: 10 }}>
-                表示中の月に、選択中カレンダーへサンプル予定を追加します。
-              </Text>
-
-              <Pressable
-                onPress={injectTestEventsForThisMonth}
-                style={{ alignSelf: 'flex-start', backgroundColor: '#111827', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10 }}
-              >
-                <Text style={{ color: 'white', fontWeight: '700' }}>この月にテストイベントを投入</Text>
-              </Pressable>
-
-              <View style={{ flex: 1 }} />
-
-              <Pressable
-                onPress={closeHelp}
-                style={{ alignSelf: 'flex-end', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: '#e5e7eb', marginTop: 16 }}
-              >
-                <Text style={{ fontWeight: '700' }}>閉じる</Text>
-              </Pressable>
             </Animated.View>
           </KeyboardAvoidingView>
         </Pressable>
