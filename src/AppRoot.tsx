@@ -3,8 +3,12 @@ import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import RootNavigator from './navigation';
-import { Platform, NativeModules } from 'react-native';
+import { Platform, NativeModules, InteractionManager } from 'react-native';
 import { encode, decode } from 'base-64';
+
+// 追記: 月シャードの先読み & 日付
+import { prefetchMonthRange } from './store/monthShard';
+import dayjs from './lib/dayjs';
 
 // 追記: SecureStore の型（簡易）
 type SecureStoreNative = {
@@ -72,12 +76,23 @@ function Bootstrapper() {
   useEffect(() => {
     (async () => {
       try {
+        // 0) まず描画を優先（重い処理はフレーム確定後に回す）
+        await new Promise<void>((resolve) => {
+          InteractionManager.runAfterInteractions(() => resolve());
+        });
+
         // 1) ローカルの永続ファイルを先に反映（即座にUIに出す）
         const file = await loadPersistFile();
         if (Array.isArray(file.instances) && file.instances.length > 0) {
           const mapped = toApiInstancesSafe(file.instances as any);
           if (mapped.length) replaceAllInstances(mapped);
         }
+
+        // 1.5) 現在月を中心に前後1ヶ月だけ軽く先読み（同期状態に依存しない段階読み込み）
+        const yyyymm = dayjs().format('YYYY-MM');
+        void prefetchMonthRange(yyyymm, 1).catch((e) => {
+          if (__DEV__) console.warn('[prefetchMonthRange] failed:', e);
+        });
 
         // 2) （開発時のみ）SecureStoreの簡易自己テスト
         if (__DEV__ && SecureStore) {
@@ -98,8 +113,10 @@ function Bootstrapper() {
           }
         }
 
-        // 3) サーバ差分同期（本番は exampleFetchServerDiff を差し替え）
-        await runIncrementalSync(exampleFetchServerDiff);
+        // 3) サーバ差分同期は fire-and-forget（UIをブロックしない）
+        void runIncrementalSync(exampleFetchServerDiff).catch((e) => {
+          if (__DEV__) console.warn('[bootstrap] sync error (ignored):', e);
+        });
       } catch (e) {
         if (__DEV__) {
           console.warn('[AppRoot] bootstrap failed:', e);

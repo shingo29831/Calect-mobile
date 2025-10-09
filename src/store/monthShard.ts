@@ -1,3 +1,4 @@
+// src/store/monthShard.ts
 import RNFS from 'react-native-fs';
 import dayjs from '../lib/dayjs';
 import type { EventInstance } from '../api/types';
@@ -49,7 +50,7 @@ export async function ensureMonths(yyyyMMs: string[]) {
 /** 前後の月を軽く先読み（任意） */
 export async function prefetchMonthRange(centerYYYYMM: string, span = 1) {
   const base = dayjs(centerYYYYMM + '-01');
-  const keys = [];
+  const keys: string[] = [];
   for (let i = -span; i <= span; i++) keys.push(base.add(i, 'month').format('YYYY-MM'));
   await ensureMonths(keys);
 }
@@ -83,4 +84,14 @@ export async function getByDatesWithEnsure(dates: string[]): Promise<Record<stri
   const out: Record<string, EventInstance[]> = {};
   for (const d of dates) out[d] = getInstancesForDate(d);
   return out;
+}
+
+/* =========================================================
+ * 互換用エクスポート（CalendarScreen が参照）
+ * =======================================================*/
+export async function ensureMonthLoaded(month: string): Promise<void> {
+  await loadMonth(month);
+}
+export async function ensureMonthsLoaded(months: string[]): Promise<void> {
+  await ensureMonths(months);
 }

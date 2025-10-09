@@ -72,6 +72,9 @@ const PROFILE_EMOJI = '🙂';
 const ROW_HEIGHT = 64;
 const PAGE = 50;
 
+/** 同期フェイルオープンのタイムアウト（この時間で UI を有効化） */
+const SYNC_TIMEOUT_MS = 1400;
+
 // 小さな状態バッジ
 function StatusBadge({ text }: { text: string }) {
   return (
@@ -88,7 +91,7 @@ function StatusBadge({ text }: { text: string }) {
   );
 }
 
-// EventInstance -> DayCell で必要な形（EventSegment風）へ変換
+// EventInstance -> DayCell で必要な形（EventSegment風）へ変換（拡張フィールドは付けない）
 type EventSegmentMinimal = EventInstance & { spanLeft: boolean; spanRight: boolean };
 const toLocalSegment = (ev: EventInstance): EventSegmentMinimal => ({
   ...ev,
@@ -96,7 +99,7 @@ const toLocalSegment = (ev: EventInstance): EventSegmentMinimal => ({
   spanRight: false,
 });
 
-// ★ EventInstanceの重複判定用キー（idが無い型でも安定）
+// 重複判定キー（現行 EventInstance のみで安定）
 const dedupeKey = (ev: EventInstance) =>
   `${String(ev.calendar_id ?? '')}|${String(ev.title ?? '')}|${String(ev.start_at ?? '')}|${String(ev.end_at ?? '')}`;
 
@@ -162,7 +165,7 @@ export default function CalendarScreen({ navigation }: Props) {
   // ローカルイベント（日付別）
   const [localByDate, setLocalByDate] = useState<Record<string, EventInstance[]>>({});
 
-  // ★ 二重保存ロック（UIと同期的ガード）
+  // 二重保存ロック
   const [isSaving, setIsSaving] = useState(false);
   const savingRef = useRef(false);
 
@@ -182,7 +185,7 @@ export default function CalendarScreen({ navigation }: Props) {
     return Math.floor(cellH * ROWS);
   }, [cellH]);
 
-  // CalendarList を描画可能に（初回ペイントを待たない）
+  // CalendarList を描画可能に
   const [calReady, setCalReady] = useState(false);
   useEffect(() => {
     setCalReady(innerW > 0 && cellH > 0);
@@ -212,7 +215,7 @@ export default function CalendarScreen({ navigation }: Props) {
   const colWBase = useMemo(() => (innerW > 0 ? Math.floor(innerW / 7) : 0), [innerW]);
   const colWLast = useMemo(() => (innerW > 0 ? innerW - colWBase * 6 : 0), [innerW, colWBase]);
 
-  // 表示対象のグループ
+  // 表示対象のグループ（現行のイベントに group_* が無くても true を返す分岐にしてある）
   const getVisibleGroupIds = useCallback((): string[] => {
     if (selectedEntity.kind === 'group') return [selectedEntity.id];
     if (selectedEntity.kind === 'org' || selectedEntity.kind === 'me') {
@@ -226,7 +229,7 @@ export default function CalendarScreen({ navigation }: Props) {
     const getGroupId = (ev: any) => ev?.group_id ?? ev?.groupId ?? ev?.owner_group_id ?? null;
     return listRaw.filter((ev) => {
       const gid = getGroupId(ev);
-      if (!gid) return true;
+      if (!gid) return true; // ★ 現行データに group 情報が無い場合は全表示
       if (selectedEntity.kind === 'group') return gid === selectedEntity.id;
       if (selectedEntity.kind === 'org' || selectedEntity.kind === 'me') {
         return visibleGroupIds.length === 0 ? true : visibleGroupIds.includes(gid);
@@ -254,7 +257,6 @@ export default function CalendarScreen({ navigation }: Props) {
 
       const list = await loadLocalEvents();
 
-      // 当月の先頭/末尾（ローカル日付）
       if (monthDates.length === 0) return;
       const monthStart = startOfLocalDay(monthDates[0]);
       const monthEnd   = endOfLocalDay(monthDates[monthDates.length - 1]);
@@ -265,12 +267,12 @@ export default function CalendarScreen({ navigation }: Props) {
         const s = fromUTC(ev.start_at);
         const e = fromUTC(ev.end_at);
 
-      // この月にかかる区間にクリップ
+        // この月にかかる区間にクリップ
         const clipStart = s.isAfter(monthStart) ? s : monthStart;
         const clipEnd   = e.isBefore(monthEnd) ? e : monthEnd;
         if (clipEnd.isBefore(clipStart)) continue;
 
-        // その期間の日付だけを回す（最大でも実在する日数分）
+        // その期間の日付だけを回す
         let d = clipStart.startOf('day');
         const endDay = clipEnd.startOf('day');
         while (d.isBefore(endDay) || d.isSame(endDay)) {
@@ -289,7 +291,7 @@ export default function CalendarScreen({ navigation }: Props) {
     return () => { cancelled = true; setLocalLoaded(false); };
   }, [calReady, deferredMonth, monthDates]);
 
-  // 3) ローカル読み込み完了 → DB同期（当月＋前後月）
+  // 3) ローカル読み込み完了 → DB同期（当月＋前後月）※フェイルオープン
   useEffect(() => {
     if (!localLoaded) return;
     let alive = true;
@@ -308,17 +310,25 @@ export default function CalendarScreen({ navigation }: Props) {
           center.add(1, 'month').format('YYYY-MM'),
         ];
 
-        // ローカル描画が見えた直後に少し間を置いてから同期開始（体感改善）
+        // UI 体感のため少しディレイ
         await new Promise<void>(r => setTimeout(() => r(), 120));
 
-        if (mod?.ensureMonthsLoaded) {
-          await mod.ensureMonthsLoaded(months);
-        } else if (mod?.ensureMonthLoaded) {
-          await Promise.all(months.map(m => mod.ensureMonthLoaded!(m)));
-        }
+        const doEnsure = async () => {
+          if (mod?.ensureMonthsLoaded) {
+            await mod.ensureMonthsLoaded(months);
+          } else if (mod?.ensureMonthLoaded) {
+            await Promise.all(months.map(m => mod.ensureMonthLoaded!(m)));
+          }
+        };
+
+        // タイムアウトで UI を先に解放
+        const timeout = new Promise<void>((resolve) => setTimeout(resolve, SYNC_TIMEOUT_MS));
+        await Promise.race([doEnsure(), timeout]).catch(() => {});
         if (alive) setDbReady(true);
+        // バックグラウンドで続行
+        doEnsure().catch(() => {});
       } catch {
-        if (alive) setDbReady(true); // 失敗してもUIは進める
+        if (alive) setDbReady(true);
       }
     })();
     return () => { alive = false; setDbReady(false); };
@@ -452,7 +462,7 @@ export default function CalendarScreen({ navigation }: Props) {
     ({ date, state, marking, onPress }: any) => {
       const dateStr = date?.dateString as string;
 
-      // DB側（EventSegment[]）
+      // DB側
       const dbSegs = dbReady ? (eventsByDate[dateStr] ?? []) : [];
 
       // ローカル側（EventInstance[] -> EventSegment風に変換）
@@ -489,7 +499,7 @@ export default function CalendarScreen({ navigation }: Props) {
    * =========================*/
   const visitedMonthsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!dbReady) return; // DB準備前は先読みを止めて同時IOを避ける
+    if (!dbReady) return; // DB準備前は先読みを止める
     const run = async () => {
       const m0 = dayjs(currentMonth + '-01');
       const months = [-2, -1, 1, 2].map((off) => m0.add(off, 'month').format('YYYY-MM'));
@@ -569,15 +579,19 @@ export default function CalendarScreen({ navigation }: Props) {
       { day: 18, title: 'Test: Family',     start: '18:00', end: '19:00' },
       { day: 25, title: 'Test: Focus',      start: '09:00', end: '11:00' },
     ];
-    const cal = (Array.isArray(CALENDARS) ? CALENDARS : []).find(c => c?.calendar_id === formCalId);
-    const color = cal?.color ?? undefined;
 
     const created: Array<{ inst: EventInstance; dStr: string }> = [];
     for (const smp of samples) {
       const d = monthStart.date(smp.day);
       const startLocalISO = d.format(`YYYY-MM-DD ${smp.start}`);
       const endLocalISO   = d.format(`YYYY-MM-DD ${smp.end}`);
-      const inst = await saveLocalEvent({ calendar_id: formCalId, title: smp.title, startLocalISO, endLocalISO, color });
+      // ★ 現行 EventInstance 形に合わせ color 等は渡さない
+      const inst = await saveLocalEvent({
+        calendar_id: formCalId,
+        title: smp.title,
+        startLocalISO,
+        endLocalISO,
+      });
       created.push({ inst, dStr: d.format('YYYY-MM-DD') });
     }
 
@@ -638,8 +652,8 @@ export default function CalendarScreen({ navigation }: Props) {
                 style={{ height: calendarBodyH }}
                 calendarStyle={{ paddingTop: 0, marginTop: 0 }}
                 calendarHeight={calendarBodyH}
-                pastScrollRange={12}
-                futureScrollRange={12}
+                pastScrollRange={120}
+                futureScrollRange={120}
                 minDate={'1900-01-01'}
                 maxDate={'2100-12-31'}
                 hideExtraDays={false}
@@ -836,20 +850,18 @@ export default function CalendarScreen({ navigation }: Props) {
 
                 <Pressable
                   onPress={async () => {
-                    // ---- ★ 二重押しロック ----
                     if (savingRef.current) return;
                     savingRef.current = true;
                     setIsSaving(true);
                     try {
                       if (!formTitle.trim()) return;
 
-                      const cal = (Array.isArray(CALENDARS) ? CALENDARS : []).find(c => c?.calendar_id === formCalId);
+                      // ★ 現行データ形式に合わせ color を渡さない
                       const inst = await saveLocalEvent({
                         calendar_id: formCalId,
                         title: formTitle.trim(),
                         startLocalISO: formStart,
                         endLocalISO: formEnd,
-                        color: cal?.color ?? undefined,
                       });
 
                       const dStr = dayjs(formStart).format('YYYY-MM-DD');
@@ -866,7 +878,6 @@ export default function CalendarScreen({ navigation }: Props) {
                         setSheetItems(prev => (prev.some(x => dedupeKey(x) === k) ? prev : [inst, ...prev]));
                       }
 
-                      // 閉じるアニメーション
                       addSheetY.stopAnimation();
                       Animated.timing(addSheetY, { toValue: ADD_SHEET_H, duration: 220, useNativeDriver: true })
                         .start(() => setAddVisible(false));
