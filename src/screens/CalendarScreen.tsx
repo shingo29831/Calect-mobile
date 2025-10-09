@@ -1,6 +1,6 @@
 // src/screens/CalendarScreen.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from 'react';
-import { View, Text, Pressable, Platform, TextInput, KeyboardAvoidingView, Animated, PixelRatio } from 'react-native';
+import { View, Text, Pressable, Platform, TextInput, KeyboardAvoidingView, Animated } from 'react-native';
 import type { AppStateStatus } from 'react-native';
 import { CalendarList } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
@@ -217,10 +217,12 @@ export default function CalendarScreen({ navigation }: Props) {
   const [localLoaded, setLocalLoaded] = useState(false);
   const [dbReady, setDbReady] = useState(false);
 
-  // ✅ 同期中フラグ & 一度だけ行うためのRef
+  // ✅ 同期制御（タイムアウト強制終了に対応）
   const [syncing, setSyncing] = useState(false);
+  const [syncTimedOut, setSyncTimedOut] = useState(false);
   const hasSyncedRef = useRef(false);
-  const SYNC_TIMEOUT_MS = 2500; // ← ここでタイムアウト時間を調整できます
+  const syncRunIdRef = useRef(0);
+  const SYNC_TIMEOUT_MS = 2500; // タイムアウト
 
   // ドロワー
   const left = useAnimatedDrawer(Math.floor(Math.min(360, SCREEN_W * 0.84)), 'left');
@@ -266,12 +268,13 @@ export default function CalendarScreen({ navigation }: Props) {
 
   const initialCurrent = useRef(dayjs().startOf('month').format('YYYY-MM-DD')).current;
 
-  // ページ高さ→行高さ
+  // ページ高さ→行高さ（整数で厳密化）
   const pageHeight = useMemo(() => {
     if (gridH <= 0) return 0;
     const weekH = Math.max(weekHeaderH, 24);
     const usable = Math.max(0, gridH - MONTH_TITLE_HEIGHT - weekH);
-    return Math.round(PixelRatio.roundToNearestPixel(usable));
+    const cell = Math.max(1, Math.floor(usable / ROWS));
+    return cell * ROWS;
   }, [gridH, weekHeaderH]);
 
   const cellH = useMemo(() => {
@@ -361,17 +364,30 @@ export default function CalendarScreen({ navigation }: Props) {
     return () => { cancelled = true; setLocalLoaded(false); };
   }, [deferredMonth, monthDates]);
 
-  // ===== DB同期（タイムアウトで中断・一度だけ） =====
+  // ===== DB同期（タイムアウトで"確実に"打ち切る：ランIDでレース無効化） =====
   useEffect(() => {
     if (!localLoaded || hasSyncedRef.current) return;
 
-    let cancelled = false;
-    let timeoutId: any = null;
+    const thisRunId = ++syncRunIdRef.current; // 新しい同期サイクルID
+    let hardTimer: any = null;
+    let finished = false;
 
     setSyncing(true);
 
+    const finish = (opts: { ok: boolean; timedOut?: boolean }) => {
+      if (finished) return; // 二重終了防止
+      finished = true;
+      if (syncRunIdRef.current !== thisRunId) return; // 既に別ラン
+      hasSyncedRef.current = true;
+      setDbReady(true); // どちらでもUIはローカル+サーバ準備OK扱い
+      setSyncing(false);
+      if (opts.timedOut) setSyncTimedOut(true);
+      if (hardTimer) clearTimeout(hardTimer);
+    };
+
     (async () => {
       try {
+        // ensureMonthsLoaded / ensureMonthLoaded のどちらにも対応
         const mod = (await import('../store/monthShard').catch(() => null)) as
           | { ensureMonthLoaded?: (m: string)=>Promise<void>; ensureMonthsLoaded?: (ms: string[])=>Promise<void> }
           | null;
@@ -383,36 +399,34 @@ export default function CalendarScreen({ navigation }: Props) {
           center.add(1,'month').format('YYYY-MM')
         ];
 
-        const ensurePromise =
-          mod?.ensureMonthsLoaded ? mod.ensureMonthsLoaded(months) :
-          mod?.ensureMonthLoaded  ? Promise.all(months.map(m => mod.ensureMonthLoaded!(m))) :
-          Promise.resolve();
+        const ensurePromise = mod?.ensureMonthsLoaded
+          ? mod.ensureMonthsLoaded(months)
+          : mod?.ensureMonthLoaded
+            ? Promise.all(months.map(m => mod.ensureMonthLoaded!(m)))
+            : Promise.resolve();
 
-        // タイムアウト：SYNC_TIMEOUT_MS 経過で打ち切り
-        const timeoutPromise = new Promise<void>((resolve) => {
-          timeoutId = setTimeout(resolve, SYNC_TIMEOUT_MS);
-        });
+        // ハードタイムアウト：時間が来たら確実に終了させる
+        hardTimer = setTimeout(() => finish({ ok: false, timedOut: true }), SYNC_TIMEOUT_MS);
 
-        await Promise.race([ensurePromise, timeoutPromise]);
-
-        if (!cancelled) {
-          hasSyncedRef.current = true;
-          setDbReady(true);
-          setSyncing(false);
-        }
+        await ensurePromise; // 正常完了
+        finish({ ok: true });
       } catch {
-        if (!cancelled) {
-          hasSyncedRef.current = true;
-          setDbReady(true);
-          setSyncing(false);
-        }
-      } finally {
-        if (timeoutId) clearTimeout(timeoutId);
+        finish({ ok: false });
       }
     })();
 
-    return () => { cancelled = true; if (timeoutId) clearTimeout(timeoutId); };
+    // クリーンアップ：このランを無効化
+    return () => {
+      if (hardTimer) clearTimeout(hardTimer);
+    };
   }, [localLoaded, currentMonth]);
+
+  // タイムアウト通知は数秒で自動で消す
+  useEffect(() => {
+    if (!syncTimedOut) return;
+    const t = setTimeout(() => setSyncTimedOut(false), 2500);
+    return () => clearTimeout(t);
+  }, [syncTimedOut]);
 
   // ヘッダ
   useEffect(() => {
@@ -619,15 +633,18 @@ export default function CalendarScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      {/* スキーマ読み込み中バッジ */}
-      {!schemaReady && <StatusBadge text="Loading profile & entities…" />}
-
       {/* ステータスバッジ */}
+      {!schemaReady && <StatusBadge text="Loading profile & entities…" />}
       {schemaReady && !localLoaded && <StatusBadge text="Load events…" />}
       {schemaReady && localLoaded && syncing && <StatusBadge text="Sync server…" />}
+      {syncTimedOut && <StatusBadge text="Sync timeout — local first" />}
 
       {/* カレンダー */}
-      <View style={styles.gridBlock} onLayout={(e) => setGridH(e.nativeEvent.layout.height)}>
+      <View style={styles.gridBlock} onLayout={(e) => setGridH(Math.round(e.nativeEvent.layout.height))}>
+        {/* absolute 罫線（高さに影響しない） */}
+        <View style={styles.gridTopLine} />
+        <View style={styles.gridLeftLine} />
+
         <View style={styles.gridInner} onLayout={(e) => setInnerW(e.nativeEvent.layout.width)}>
           {/* 月タイトル */}
           <View style={{ height: MONTH_TITLE_HEIGHT, alignItems: 'center', justifyContent: 'center' }}>

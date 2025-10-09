@@ -20,6 +20,11 @@ npx react-native start --reset-cache
 npx react-native run-android
 
 
+アンインストール
+adb uninstall com.calect
+# その後、ビルド＆再インストール
+npx react-native run-android
+
 
 
 
