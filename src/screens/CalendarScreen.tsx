@@ -673,25 +673,35 @@ export default function CalendarScreen({ navigation }: Props) {
                 key={`${innerW}x${cellH}x${weekHeaderH}x${pageHeight}x${FIRST_DAY}`}
                 firstDay={FIRST_DAY}
                 current={initialCurrent}
-                horizontal={false}
+                // ▼ 横スクロール & 1ページスナップ
+                horizontal
                 pagingEnabled
+
+                // 横ページングの幅・高さを明示
+                calendarWidth={innerW}
+                calendarHeight={pageHeight}
+
                 hideDayNames
                 renderHeader={() => null}
                 style={{ height: pageHeight }}
                 calendarStyle={{ paddingTop: 0, marginTop: 0 }}
-                calendarHeight={pageHeight}
+
                 pastScrollRange={120}
                 futureScrollRange={120}
                 minDate={'1900-01-01'}
                 maxDate={'2100-12-31'}
                 hideExtraDays={false}
                 showSixWeeks
+
                 onDayPress={handleDayPress}
                 onVisibleMonthsChange={onVisibleMonthsChange}
                 markedDates={marked}
                 showScrollIndicator={false}
                 theme={calendarTheme as any}
+
+                // 横でも問題ないが、気になる場合は省いてOK
                 contentContainerStyle={{ alignItems: 'flex-start', paddingHorizontal: 0, paddingTop: 0 }}
+
                 dayComponent={renderDay as any}
               />
             )}
