@@ -1,6 +1,6 @@
 // src/screens/CalendarScreen.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from 'react';
-import { View, Text, Pressable, Platform, TextInput, KeyboardAvoidingView, Animated } from 'react-native';
+import { View, Text, Pressable, Platform, TextInput, KeyboardAvoidingView, Animated, Image, StyleSheet } from 'react-native';
 import type { AppStateStatus } from 'react-native';
 import { CalendarList } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
@@ -48,6 +48,7 @@ const TEXT_PRIMARY  = '#e2e8f0'; // 主要文字色
 const TEXT_SECONDARY= '#94a3b8'; // 補助文字
 const ACCENT        = '#60a5fa'; // 強調（Pillなど）
 const ACCENT_TEXT   = '#0b1220'; // アクセント背景上の文字色
+const BG_SCRIM      = 'rgba(4,7,14,0.42)'; // 背景画像上の薄いスクリーン
 
 // ===== 新スキーマ: ローダ =====
 type ServerDocV2 = {
@@ -162,6 +163,13 @@ export default function CalendarScreen({ navigation }: Props) {
     return () => { alive = false; };
   }, []);
 
+  // ★ 背景画像URI（prefs.calendars の最初の background_image を使用）
+  const bgImageUri = useMemo(() => {
+    const all = Object.values(prefs?.calendars ?? {});
+    const first = all.find(c => !!c?.background_image)?.background_image ?? null;
+    return (typeof first === 'string' && first.length > 0) ? first : null;
+  }, [prefs]);
+
   // ■ UI用マッピング
   const ORGS: EntityItem[] = useMemo(() => {
     const list: EntityItem[] = [];
@@ -231,7 +239,6 @@ export default function CalendarScreen({ navigation }: Props) {
   const [syncTimedOut, setSyncTimedOut] = useState(false);
   const hasSyncedRef = useRef(false);
   const syncRunIdRef = useRef(0);
-  const SYNC_TIMEOUT_MS = 2500; // タイムアウト
 
   // ドロワー
   const left = useAnimatedDrawer(Math.floor(Math.min(360, SCREEN_W * 0.84)), 'left');
@@ -386,16 +393,16 @@ export default function CalendarScreen({ navigation }: Props) {
   useEffect(() => {
     if (!localLoaded || hasSyncedRef.current) return;
 
-    const thisRunId = ++syncRunIdRef.current; // 新しい同期サイクルID
+    const thisRunId = ++syncRunIdRef.current;
     let hardTimer: any = null;
     let finished = false;
 
     setSyncing(true);
 
     const finish = (opts: { ok: boolean; timedOut?: boolean }) => {
-      if (finished) return; // 二重終了防止
+      if (finished) return;
       finished = true;
-      if (syncRunIdRef.current !== thisRunId) return; // 既に別ラン
+      if (syncRunIdRef.current !== thisRunId) return;
       hasSyncedRef.current = true;
       setDbReady(true);
       setSyncing(false);
@@ -516,24 +523,28 @@ export default function CalendarScreen({ navigation }: Props) {
     });
   }, [sheetDate, filterEventsByEntity, localByDate, dbReady]);
 
-  // CalendarList テーマ（ダーク背景）
-  const calendarTheme: any = useMemo(() => ({
-    backgroundColor: APP_BG,
-    calendarBackground: APP_BG,
-    textDayFontSize: DAY_FONT,
-    textDayFontWeight: '700',
-    textMonthFontSize: 20,
-    textMonthFontWeight: '800',
-    'stylesheet.calendar.main': {
-      container: { paddingLeft: 0, paddingRight: 0, paddingTop: 0, backgroundColor: 'transparent' },
-      monthView: { paddingHorizontal: 0, paddingTop: 0, marginTop: 0, backgroundColor: 'transparent' },
-      week: { marginTop: 0, marginBottom: 0, padding: 0, flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'stretch', backgroundColor: 'transparent' },
-      dayContainer: { flex: 0, padding: 0, margin: 0, alignItems: 'flex-start', justifyContent: 'flex-start', width: undefined, backgroundColor: 'transparent' },
-    },
-    'stylesheet.day.basic': { base: { flex: 0, width: undefined, margin: 0, padding: 0, alignItems: 'stretch', justifyContent: 'flex-start', backgroundColor: 'transparent' } },
-    'stylesheet.calendar-list.main': { calendar: { paddingLeft: 0, paddingRight: 0, paddingTop: 0, marginTop: 0, backgroundColor: 'transparent' } },
-    'stylesheet.calendar.header': { header: { marginBottom: 0, paddingVertical: 0, height: 0, backgroundColor: 'transparent' } },
-  }), []);
+  // CalendarList テーマ（背景画像がある時は透明化）
+  const calendarTheme: any = useMemo(() => {
+    const transparent = !!bgImageUri;
+    const bg = transparent ? 'transparent' : APP_BG;
+    return {
+      backgroundColor: bg,
+      calendarBackground: bg,
+      textDayFontSize: DAY_FONT,
+      textDayFontWeight: '700',
+      textMonthFontSize: 20,
+      textMonthFontWeight: '800',
+      'stylesheet.calendar.main': {
+        container: { paddingLeft: 0, paddingRight: 0, paddingTop: 0, backgroundColor: 'transparent' },
+        monthView: { paddingHorizontal: 0, paddingTop: 0, marginTop: 0, backgroundColor: 'transparent' },
+        week: { marginTop: 0, marginBottom: 0, padding: 0, flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'stretch', backgroundColor: 'transparent' },
+        dayContainer: { flex: 0, padding: 0, margin: 0, alignItems: 'flex-start', justifyContent: 'flex-start', width: undefined, backgroundColor: 'transparent' },
+      },
+      'stylesheet.day.basic': { base: { flex: 0, width: undefined, margin: 0, padding: 0, alignItems: 'stretch', justifyContent: 'flex-start', backgroundColor: 'transparent' } },
+      'stylesheet.calendar-list.main': { calendar: { paddingLeft: 0, paddingRight: 0, paddingTop: 0, marginTop: 0, backgroundColor: 'transparent' } },
+      'stylesheet.calendar.header': { header: { marginBottom: 0, paddingVertical: 0, height: 0, backgroundColor: 'transparent' } },
+    };
+  }, [bgImageUri]);
 
   // DayCell（中日でも罫線を隠さない）
   const renderDay = useCallback(
@@ -651,8 +662,19 @@ export default function CalendarScreen({ navigation }: Props) {
     closeHelp();
   }, [currentMonth, formCalId, sheetDate, sheetVisible, closeHelp]);
 
+  // ★ 背景色（画像があれば透過、なければダーク）
+  const bgColor = bgImageUri ? 'transparent' : APP_BG;
+
   return (
-    <View style={[styles.container, { backgroundColor: APP_BG }]}>
+    <View style={[styles.container, { backgroundColor: bgColor }]}>
+      {/* ★ 背景画像 & スクリーン */}
+      {bgImageUri ? (
+        <>
+          <Image source={{ uri: bgImageUri }} resizeMode="cover" style={StyleSheet.absoluteFillObject} />
+          <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: BG_SCRIM }]} />
+        </>
+      ) : null}
+
       {/* ステータスバッジ */}
       {!schemaReady && <StatusBadge text="Loading profile & entities…" />}
       {schemaReady && !localLoaded && <StatusBadge text="Load events…" />}
@@ -660,12 +682,12 @@ export default function CalendarScreen({ navigation }: Props) {
       {syncTimedOut && <StatusBadge text="Sync timeout — local first" />}
 
       {/* カレンダー */}
-      <View style={[styles.gridBlock, { backgroundColor: APP_BG }]} onLayout={(e) => setGridH(Math.round(e.nativeEvent.layout.height))}>
-        {/* absolute 罫線（styles 側の色が明るすぎる場合は後でそちらも調整推奨） */}
+      <View style={[styles.gridBlock, { backgroundColor: 'transparent' }]} onLayout={(e) => setGridH(Math.round(e.nativeEvent.layout.height))}>
+        {/* absolute 罫線 */}
         <View style={styles.gridTopLine} />
         <View style={styles.gridLeftLine} />
 
-        <View style={[styles.gridInner, { backgroundColor: APP_BG }]} onLayout={(e) => setInnerW(e.nativeEvent.layout.width)}>
+        <View style={[styles.gridInner, { backgroundColor: 'transparent' }]} onLayout={(e) => setInnerW(e.nativeEvent.layout.width)}>
           {/* 月タイトル */}
           <View style={{ height: MONTH_TITLE_HEIGHT, alignItems: 'center', justifyContent: 'center' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -706,7 +728,7 @@ export default function CalendarScreen({ navigation }: Props) {
             </View>
           </View>
 
-          {/* 曜日ヘッダー（WeekHeader側は背景透過なのでそのまま） */}
+          {/* 曜日ヘッダー */}
           <View onLayout={(e) => setWeekHeaderH(Math.round(e.nativeEvent.layout.height))}>
             {innerW > 0 ? <WeekHeader colWBase={colWBase} colWLast={colWLast} /> : null}
           </View>
@@ -770,7 +792,7 @@ export default function CalendarScreen({ navigation }: Props) {
         emoji="🙂"
       />
 
-      {/* 日別イベントシート（ダーク配色） */}
+      {/* 日別イベントシート */}
       <DayEventsSheet
         visible={sheetVisible}
         sheetY={sheetY}
@@ -780,10 +802,9 @@ export default function CalendarScreen({ navigation }: Props) {
         onClose={closeSheet}
         onEndReached={onEndReached}
         rowHeight={64}
-        // 既存のコンポに props が無ければこのままでOK（内部が白固定なら別途修正）
       />
 
-      {/* 右下 ＋ FAB（そのままOK） */}
+      {/* 右下 ＋ FAB */}
       <Pressable
         onPress={() => {
           setFormTitle('');
@@ -809,7 +830,7 @@ export default function CalendarScreen({ navigation }: Props) {
         <Text style={{ color: 'white', fontSize: 28, lineHeight: 28, marginTop: -2 }}>＋</Text>
       </Pressable>
 
-      {/* 左下 ？ FAB（ダーク寄せ） */}
+      {/* 左下 ？ FAB */}
       <Pressable
         onPress={openHelp}
         hitSlop={10}

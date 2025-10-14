@@ -42,7 +42,6 @@ export type ClientPrefsV1 = {
         border_color?: string;
       };
 
-      // 仕様にある overlays は今のUIでは未参照
       overlays?: Array<{
         calendar_id?: string;
         event_filters?: {
@@ -109,11 +108,65 @@ export type ClientPrefsV1 = {
 };
 
 // -----------------------------------------------
-// 実体（後でモジュール差し替え前提のダミー）
-//  - ネイティブ側や起動時ロードで代入される想定
+// 実体（テスト用データを定義）
+//  - 必要ならネイティブや起動時ロードで上書きされる想定
 // -----------------------------------------------
-export const server: ServerDocV2 | undefined = undefined;
-export const prefs: ClientPrefsV1 | undefined = undefined;
+
+export const server: ServerDocV2 | undefined = {
+  version: 2,
+};
+
+// ✅ ここにテスト用の背景画像設定を入れています
+export const prefs: ClientPrefsV1 | undefined = {
+  version: 1,
+  meta: {
+    schema: 'client-prefs-v1',
+    updated_at: new Date().toISOString(),
+    app_version: '0.1.0',
+  },
+  display: {
+    theme: 'dark',
+    week_start: 'sun',
+    time_format: '24h',
+    tz_follow_device: true,
+    show_holidays: false,
+    show_week_numbers: false,
+  },
+  users: {
+    nicknames: {
+      u1: 'Alice',
+      u2: 'Bob',
+    },
+  },
+  calendars: {
+    // あなたのアプリ側でデフォルト利用しているIDに合わせておくと拾われます
+    // （例：CAL_LOCAL_DEFAULT）
+    CAL_LOCAL_DEFAULT: {
+      // ▼ 好きな画像URLに差し替えてOK（https/file/content スキーム対応）
+    //   background_image:
+    //     'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?q=80&w=1600&auto=format&fit=crop',
+      icon_image_path:
+        'https://images.unsplash.com/photo-1544006659-f0b21884ce1d?q=80&w=100&auto=format&fit=crop',
+      event_style_default: {
+        // ダークテーマでのデフォルト色（必要なら）
+        font_color: '#e2e8f0',
+        background_color: 'rgba(96,165,250,0.12)',
+        border_color: '#60a5fa',
+      },
+    },
+
+    // 追加のカレンダー例
+    CAL_TEAM: {
+      background_image: null, // 背景なし（APP_BGで表示される想定）
+      icon_image_path: null,
+      event_style_default: {
+        font_color: '#e2e8f0',
+        background_color: 'rgba(16,185,129,0.12)',
+        border_color: '#10b981',
+      },
+    },
+  },
+};
 
 // 既存API（互換）
 export function getAppData(): AppData {
