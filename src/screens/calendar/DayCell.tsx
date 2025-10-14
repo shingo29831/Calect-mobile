@@ -1,6 +1,6 @@
 // DayCell.tsx
 import React from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable, PixelRatio } from 'react-native';
 import type { EventInstance } from '../../api/types';
 
 // react-native-calendars の dayComponent から渡ってくる date の最小型
@@ -26,43 +26,53 @@ export type DayCellProps = DayComponentBaseProps & {
   colWLast: number;
   cellH: number;
   dayEvents: EventInstance[];
-  hideRightDivider?: boolean;
+  hideRightDivider?: boolean; // ←来ても無視（右罫線は常に描画）
   moreCount?: number;
 };
 
-// 画面共通定義（CalendarParts 由来の想定値）
-// ※ ここに直接書いておくことで、このファイル単体で成立します。
-//   既存の CalendarParts に同名があるなら競合を避けるためここを削って import に差し替えてOK。
-const HAIR_SAFE = 0.5;               // StyleSheet.hairlineWidth の安全値
-const LINE_COLOR = '#e6e9ef';
+// 画面共通定義
 const DATE_COLOR = '#0f172a';
 const DISABLED_DATE_COLOR = '#9aa4b2';
-const TODAY_BG = '#0ea5e91a';
+const TODAY_BORDER = '#0ea5e9';
 const EVENT_TEXT = '#0f172a';
 const EVENT_DOT_FALLBACK = '#334155';
+
+// ★ 罫線の色＆太さ（ここを変えるだけで一括調整）
+const LINE_COLOR = '#e6e9ef';
+// 端末解像度を考慮した「見た目少し太め」
+// お好みに応じて 1 / PixelRatio.get() * n でもOK
+const LINE_THICKNESS = 1.25;
 
 export default function DayCell(props: DayCellProps) {
   const {
     date, state, onPress,
     colWBase, colWLast, cellH,
-    dayEvents, hideRightDivider, moreCount = 0,
+    dayEvents, /* hideRightDivider (無視) */ moreCount = 0,
   } = props;
 
-  // 右端列なら colWLast、そうでなければ colWBase を適用
-  const colW = hideRightDivider ? colWLast : colWBase;
+  // 曜日から最終列かどうかを判定（0:Sun ... 6:Sat）
+  const dayOfWeek = new Date(date.timestamp).getDay();
+  const isLastCol = dayOfWeek === 6;
+  const colW = isLastCol ? colWLast : colWBase;
 
-  // セル固定枠（高さ・幅がレイアウトの唯一の基準。縦 margin/border は使わない）
   return (
-    <View style={{ height: cellH, width: colW, overflow: 'hidden' }}>
+    <View
+      style={{
+        height: cellH,
+        width: colW,
+        overflow: 'hidden',
+        backgroundColor: 'transparent', // 背景は透明
+      }}
+    >
       <Pressable
         onPress={onPress ? () => onPress(date) : undefined}
         android_ripple={{ color: '#00000014' }}
         style={[
           styles.inner,
-          state === 'today' ? styles.todayBg : null,
+          state === 'today' ? styles.todayOutline : null, // 枠線のみで今日を強調
         ]}
       >
-        {/* 日付ラベル（拡大で崩れないように allowFontScaling=false 推奨） */}
+        {/* 日付ラベル */}
         <Text
           allowFontScaling={false}
           style={[
@@ -73,12 +83,12 @@ export default function DayCell(props: DayCellProps) {
           {date.day}
         </Text>
 
-        {/* イベント（縦 margin は使わず、親の padding と lineHeight で間隔を調整） */}
+        {/* イベント */}
         <View style={styles.eventsWrap}>
           {renderEventRows(dayEvents)}
         </View>
 
-        {/* 「+N」表示（重ね描画、レイアウトに影響しない） */}
+        {/* +N */}
         {moreCount > 0 && (
           <View pointerEvents="none" style={styles.moreBadge}>
             <Text allowFontScaling={false} style={styles.moreText}>+{moreCount}</Text>
@@ -86,19 +96,22 @@ export default function DayCell(props: DayCellProps) {
         )}
       </Pressable>
 
-      {/* 罫線は absolute で重ねる（レイアウトに影響しない） */}
-      {/* 上線（必要なら表示。週ごとの区切り用途／常時でもOK） */}
+      {/* 罫線（absolute。レイアウトに影響しない） */}
+      {/* 上線 */}
       <View
         pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { top: 0, bottom: undefined, height: HAIR_SAFE, backgroundColor: LINE_COLOR }]}
+        style={[StyleSheet.absoluteFill, { top: 0, bottom: undefined, height: LINE_THICKNESS, backgroundColor: LINE_COLOR }]}
       />
-      {/* 右線（最終列は省略） */}
-      {!hideRightDivider && (
-        <View
-          pointerEvents="none"
-          style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: HAIR_SAFE, backgroundColor: LINE_COLOR }}
-        />
-      )}
+      {/* 右線：常に描画（Tue/Wed/Thu 間が消えないように） */}
+      <View
+        pointerEvents="none"
+        style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: LINE_THICKNESS, backgroundColor: LINE_COLOR }}
+      />
+      {/* 下線（必要ならON。行の区切りを強めたいときに有効） */}
+      <View
+        pointerEvents="none"
+        style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: LINE_THICKNESS, backgroundColor: LINE_COLOR }}
+      />
     </View>
   );
 }
@@ -107,7 +120,7 @@ export default function DayCell(props: DayCellProps) {
 function renderEventRows(items: EventInstance[]) {
   if (!Array.isArray(items) || items.length === 0) return null;
 
-  // 1セル内に詰め込みすぎないよう、最初の 3 件だけ行で表示
+  // 1セル内は上位3件まで
   const rows = items.slice(0, 3).map((ev, idx) => {
     const color =
       // @ts-expect-error: 任意の color フィールドを許容
@@ -140,32 +153,30 @@ function renderEventRows(items: EventInstance[]) {
 const styles = StyleSheet.create({
   inner: {
     flex: 1,
-    // 縦余白は padding に集約（margin は使わない）
+    backgroundColor: 'transparent',
     paddingTop: 4,
     paddingBottom: 4,
     paddingHorizontal: 6,
   },
-  todayBg: {
-    // 今日セルの軽いハイライト（背景のみで高さは変えない）
-    backgroundColor: TODAY_BG,
+  // 今日の背景は塗らずに枠線のみ
+  todayOutline: {
+    borderWidth: 1,
+    borderColor: TODAY_BORDER,
+    borderRadius: 6,
   },
   dateText: {
     fontSize: 12,
     fontWeight: '700',
     color: DATE_COLOR,
-    // marginVertical は使わない
   },
   dateTextDisabled: {
     color: DISABLED_DATE_COLOR,
   },
   eventsWrap: {
     flex: 1,
-    // 子の縦間隔は lineHeight と row 自体の高さで表現
-    // ここで gap/margin は使わない（Android での高さ拡張を避ける）
     justifyContent: 'flex-start',
   },
   eventRow: {
-    // 行自体の高さを固定して安定させる（セル総高に影響しない）
     height: 16,
     flexDirection: 'row',
     alignItems: 'center',
@@ -174,15 +185,14 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    marginRight: 6, // 横方向の余白のみOK
+    marginRight: 6,
   },
   eventText: {
     flex: 1,
     fontSize: 10,
     color: EVENT_TEXT,
-    // 行間で視覚的な余白を確保（縦 margin は使わない）
     lineHeight: 14,
-    includeFontPadding: false, // Android の余白抑制
+    includeFontPadding: false,
     textAlignVertical: 'center',
   },
   moreBadge: {
