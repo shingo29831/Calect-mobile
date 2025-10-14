@@ -1,17 +1,9 @@
 // src/screens/calendar/DayEventsSheet.tsx
 import React from 'react';
-import { Animated, FlatList, Platform, Pressable, Text, View } from 'react-native';
+import { Animated, FlatList, Platform, Pressable, Text, View, StyleSheet } from 'react-native';
 import EventListItem from '../../components/EventListItem';
 import { styles } from './calendarStyles';
-
-/** ==== Dark theme palette (local overrides) ==== */
-const APP_OVERLAY = 'rgba(0,0,0,0.55)';
-const SHEET_BG    = '#0f172a';
-const BORDER_TOP  = '#334155';
-const HANDLE_BG   = '#475569';
-const TEXT_PRIMARY   = '#e2e8f0';
-const TEXT_SECONDARY = '#94a3b8';
-const ACCENT_TEXT    = '#93c5fd';
+import { useAppTheme } from '../../theme';
 
 type Props = {
   visible: boolean;
@@ -34,13 +26,22 @@ export default function DayEventsSheet({
   onEndReached,
   rowHeight,
 }: Props) {
+  const theme = useAppTheme();
+
   if (!visible) return null;
+
+  // オーバーレイはダーク時やや濃く、ライト時は少し薄め
+  const overlayColor =
+    theme.mode === 'dark' ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.35)';
+
+  // ハンドル色はテーマごとに少しだけ差を出す
+  const handleColor =
+    theme.mode === 'dark' ? theme.lineColorSelected : theme.border;
 
   return (
     <View style={styles.layerWrap} pointerEvents="box-none">
-      {/* Overlay をダークに */}
       <Pressable
-        style={[styles.layerOverlay, { backgroundColor: APP_OVERLAY }]}
+        style={[styles.layerOverlay, { backgroundColor: overlayColor }]}
         onPress={onClose}
       />
 
@@ -51,43 +52,40 @@ export default function DayEventsSheet({
             height,
             transform: [{ translateY: sheetY }],
             zIndex: 10001,
-            backgroundColor: SHEET_BG,
-            borderTopColor: BORDER_TOP,
+            backgroundColor: theme.surface,
+            borderTopColor: theme.border,
+            borderTopWidth: StyleSheet.hairlineWidth,
             ...(Platform.OS === 'android' ? { elevation: 16 } : {}),
           },
         ]}
       >
-        {/* つまみもダーク調整 */}
         <View style={styles.sheetHandleWrap}>
-          <View style={[styles.sheetHandle, { backgroundColor: HANDLE_BG }]} />
+          <View style={[styles.sheetHandle, { backgroundColor: handleColor }]} />
         </View>
 
-        {/* ヘッダー：罫線 & テキスト色 */}
         <View
           style={[
             styles.sheetHeader,
-            { borderBottomColor: BORDER_TOP, borderBottomWidth: 1 },
+            { borderBottomColor: theme.border, borderBottomWidth: StyleSheet.hairlineWidth },
           ]}
         >
-          <Text style={[styles.sheetTitle, { color: TEXT_PRIMARY }]}>{date}</Text>
+          <Text style={[styles.sheetTitle, { color: theme.textPrimary }]}>{date}</Text>
           <Text
-            style={[styles.sheetClose, { color: ACCENT_TEXT }]}
+            style={[styles.sheetClose, { color: theme.accent }]}
             onPress={onClose}
           >
             Close
           </Text>
         </View>
 
-        {/* リスト：空表示含めて文字色を上書き */}
         <FlatList
           data={items}
           keyExtractor={(it: any) => String(it.instance_id)}
           renderItem={({ item }) => (
-            // EventListItem の内部がライト前提でも背景透過なら違和感が出ないよう薄い区切りを追加しない方針
             <EventListItem title={item.title} start={item.start_at} end={item.end_at} />
           )}
           ListEmptyComponent={
-            <Text style={[styles.empty, { color: TEXT_SECONDARY }]}>No events</Text>
+            <Text style={[styles.empty, { color: theme.textSecondary }]}>No events</Text>
           }
           getItemLayout={(_, i) => ({ length: rowHeight, offset: rowHeight * i, index: i })}
           initialNumToRender={10}
