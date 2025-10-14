@@ -268,6 +268,9 @@ export default function CalendarScreen({ navigation }: Props) {
 
   const initialCurrent = useRef(dayjs().startOf('month').format('YYYY-MM-DD')).current;
 
+  // ★ ここを追加：CalendarList の参照
+  const calRef = useRef<any>(null);
+
   // ページ高さ→行高さ（整数で厳密化）
   const pageHeight = useMemo(() => {
     if (gridH <= 0) return 0;
@@ -287,6 +290,12 @@ export default function CalendarScreen({ navigation }: Props) {
   useEffect(() => {
     setCalReady(innerW > 0 && pageHeight > 0);
   }, [innerW, pageHeight]);
+
+  // ★ ここを追加：レイアウト確定後に「今月」へ強制スクロール
+  useEffect(() => {
+    if (!calReady || !calRef.current) return;
+    calRef.current?.scrollToMonth?.(initialCurrent, 0, true);
+  }, [calReady, initialCurrent]);
 
   // ==== 月ヘッダ切替：デバウンス ====
   const monthDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -670,7 +679,8 @@ export default function CalendarScreen({ navigation }: Props) {
           <View style={{ overflow: 'hidden' }}>
             {(pageHeight > 0 && innerW > 0) && (
               <CalendarList
-                key={`${innerW}x${cellH}x${weekHeaderH}x${pageHeight}x${FIRST_DAY}`}
+                ref={calRef}
+                key={`${innerW}x${cellH}x${weekHeaderH}x${pageHeight}x${FIRST_DAY}x${initialCurrent}`}
                 firstDay={FIRST_DAY}
                 current={initialCurrent}
                 // ▼ 横スクロール & 1ページスナップ
