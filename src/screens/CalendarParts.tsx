@@ -10,7 +10,17 @@ import {
 } from 'react-native';
 import type { DateData } from 'react-native-calendars';
 import dayjs from '../lib/dayjs';
-import { useAppTheme } from '../theme';
+
+/* ===== ダークテーマ・パレット ===== */
+const APP_BG         = '#0b1220';
+const SURFACE        = '#111827';
+const BORDER_LINE    = '#334155'; // 罫線・枠
+const BORDER_LINE_SEL= '#60a5fa'; // 選択時の強調線
+const TEXT_PRIMARY   = '#c0c8d1ff';
+const TEXT_SECONDARY = '#6c7786ff';
+const SUN_COLOR      = '#fca5a5';
+const SAT_COLOR      = '#93c5fd';
+const ACCENT         = '#60a5fa';
 
 /* ===== 画面サイズ・線幅など ===== */
 export const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
@@ -18,13 +28,11 @@ export const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
 const hairRaw = StyleSheet.hairlineWidth;
 export const HAIR_SAFE = Math.max(hairRaw, 0.5);
 
-// 罫線はやや太め（視認性UP）
+// 罫線はやや太め（暗背景で視認性UP）
 export const LINE_W = PixelRatio.roundToNearestPixel(1.5);
 
-// ▼ 互換用（外部から参照されていても動くデフォルト値）
-//   実際の描画色はコンポーネント内で Theme から取得します
-export const LINE_COLOR = '#e6e9ef';
-export const LINE_COLOR_SELECTED = '#94a3b8';
+export const LINE_COLOR = BORDER_LINE;
+export const LINE_COLOR_SELECTED = BORDER_LINE_SEL;
 
 /* ===== フォント ===== */
 export const IS_SMALL_SCREEN = SCREEN_H < 700;
@@ -36,7 +44,7 @@ export const HEADER_HEIGHT = 36;
 export const MONTH_TITLE_HEIGHT = 44;
 export const ROWS = 6; // showSixWeeks=true
 export const FIRST_DAY = 0;
-// 互換用：選択時の薄い背景（実際には Theme の accent を使って計算）
+// 選択時のみ薄いアクセントで背景を付与（暗背景で見やすい）
 export const SELECTED_BG = 'rgba(96,165,250,0.14)';
 export const SIDE_PAD = 8;
 export const SEP_H = LINE_W;
@@ -47,8 +55,7 @@ export const EVENT_BAR_H = 16;
 export const EVENT_BAR_GAP = 4;
 export const EVENT_BAR_RADIUS = 6;
 export const EVENT_TEXT_SIZE = 11;
-// 互換用デフォルト
-export const DEFAULT_EVENT_COLOR = '#60a5fa';
+export const DEFAULT_EVENT_COLOR = ACCENT;
 export const DEFAULT_EVENT_BG = 'rgba(37, 99, 235, 0.12)';
 export const BAR_INSET = 4;
 
@@ -95,17 +102,13 @@ export function getMonthRangeDates(yyyymm: string) {
 
 /* ===== 小さな UI コンポーネント群 ===== */
 export function WeekHeader({ colWBase, colWLast }: { colWBase: number; colWLast: number }) {
-  const theme = useAppTheme();
   const raw = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const labels = [...raw.slice(FIRST_DAY), ...raw.slice(0, FIRST_DAY)];
   return (
     <View style={{ height: HEADER_HEIGHT, flexDirection: 'row' }}>
       {labels.map((label, i) => {
         const weekIndex = (FIRST_DAY + i) % 7;
-        const color =
-          weekIndex === 0 ? theme.daySun :
-          weekIndex === 6 ? theme.daySat :
-          theme.textSecondary;
+        const color = weekIndex === 0 ? SUN_COLOR : weekIndex === 6 ? SAT_COLOR : TEXT_SECONDARY;
         const isLast = i === 6;
         return (
           <View
@@ -117,7 +120,7 @@ export function WeekHeader({ colWBase, colWLast }: { colWBase: number; colWLast:
               justifyContent: 'center',
               borderRightWidth: isLast ? 0 : LINE_W,
               borderBottomWidth: 0,
-              borderColor: theme.lineColor,
+              borderColor: LINE_COLOR,
             }}
           >
             <Text style={{ fontSize: HEADER_FONT, fontWeight: '700', color }}>{label}</Text>
@@ -151,8 +154,6 @@ export const DayCell = React.memo(function DayCell({
   hideRightDivider?: boolean;
   moreCount?: number;
 }) {
-  const theme = useAppTheme();
-
   const isSelected = !!marking?.selected;
   const isDisabled = state === 'disabled';
 
@@ -162,21 +163,20 @@ export const DayCell = React.memo(function DayCell({
 
   const colIndex = (wd - FIRST_DAY + 7) % 7;
 
-  // 配色は Theme に従う
+  // 暗背景で視認性の高い色に
   const dayColor = isDisabled
-    ? theme.dayDisabled
+    ? TEXT_SECONDARY
     : wd === 0
-    ? theme.daySun
+    ? SUN_COLOR
     : wd === 6
-    ? theme.daySat
-    : theme.dayWeekday;
+    ? SAT_COLOR
+    : TEXT_PRIMARY;
 
   const isLast = colIndex === 6;
   const colW = isLast ? colWLast : colWBase;
 
   const barsTop = 6 + (DAY_FONT + 2) + 6;
-  // 選択背景：accent を少し透明に
-  const cellBg = isSelected ? `${theme.accent}24` /* ~0.14 */ : 'transparent';
+  const cellBg = isSelected ? SELECTED_BG : 'transparent';
   const visibleSlots = dayEvents.slice(0, MAX_BARS_PER_DAY);
 
   return (
@@ -190,10 +190,10 @@ export const DayCell = React.memo(function DayCell({
           backgroundColor: cellBg,
         },
       ]}
-      android_ripple={{ color: `${theme.accent}2E` }}
+      android_ripple={{ color: 'rgba(96,165,250,0.18)' }}
       hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
     >
-      {/* 下罫線（常に最前面） */}
+      {/* ★ 下罫線（常に最前面） */}
       <View
         pointerEvents="none"
         style={{
@@ -202,12 +202,12 @@ export const DayCell = React.memo(function DayCell({
           right: 0,
           bottom: 0,
           height: LINE_W,
-          backgroundColor: isSelected ? theme.lineColorSelected : theme.lineColor,
+          backgroundColor: isSelected ? LINE_COLOR_SELECTED : LINE_COLOR,
           zIndex: 30,
         }}
       />
 
-      {/* 右縦罫線（最前面） */}
+      {/* ★ 右縦罫線（最前面） */}
       {!isLast && !hideRightDivider && (
         <View
           pointerEvents="none"
@@ -217,7 +217,7 @@ export const DayCell = React.memo(function DayCell({
             bottom: 0,
             right: 0,
             width: LINE_W,
-            backgroundColor: isSelected ? theme.lineColorSelected : theme.lineColor,
+            backgroundColor: isSelected ? LINE_COLOR_SELECTED : LINE_COLOR,
             zIndex: 30,
           }}
         />
@@ -249,7 +249,7 @@ export const DayCell = React.memo(function DayCell({
         {visibleSlots.map((ev, idx) => {
           const top = idx * (EVENT_BAR_H + EVENT_BAR_GAP);
 
-          if ((ev as any).__spacer) {
+          if (ev.__spacer) {
             return (
               <View
                 key={`${ev.instance_id}-${idx}`}
@@ -258,8 +258,8 @@ export const DayCell = React.memo(function DayCell({
             );
           }
 
-          const baseColor = ev.color || theme.eventDefaultFg;
-          const bg = `${baseColor}22`; // 薄い背景
+          const baseColor = ev.color || DEFAULT_EVENT_COLOR;
+          const bg = `${baseColor}22`; // 薄い背景（暗でも視認）
           const borderColor = baseColor;
 
           const radiusLeft = ev.spanLeft ? 0 : EVENT_BAR_RADIUS;
@@ -289,11 +289,7 @@ export const DayCell = React.memo(function DayCell({
               }}
             >
               {ev.showTitle ? (
-                <Text
-                  numberOfLines={1}
-                  ellipsizeMode="tail"
-                  style={{ fontSize: EVENT_TEXT_SIZE, color: theme.textPrimary, fontWeight: '600' }}
-                >
+                <Text numberOfLines={1} ellipsizeMode="tail" style={{ fontSize: EVENT_TEXT_SIZE, color: TEXT_PRIMARY, fontWeight: '600' }}>
                   {ev.title}
                 </Text>
               ) : null}
@@ -301,7 +297,7 @@ export const DayCell = React.memo(function DayCell({
           );
         })}
 
-        {/* はみ出しがある場合の more バー */}
+        {/* はみ出しがある場合の more バー（暗色用） */}
         {moreCount > 0 && (
           <View
             style={{
@@ -311,9 +307,9 @@ export const DayCell = React.memo(function DayCell({
               top: MAX_BARS_PER_DAY * (EVENT_BAR_H + EVENT_BAR_GAP),
               height: EVENT_BAR_H,
               borderRadius: EVENT_BAR_RADIUS,
-              backgroundColor: theme.border,
+              backgroundColor: '#334155', // = BORDER_LINE 程度
               borderWidth: StyleSheet.hairlineWidth,
-              borderColor: theme.textSecondary,
+              borderColor: '#475569',
             }}
           />
         )}
@@ -322,7 +318,7 @@ export const DayCell = React.memo(function DayCell({
   );
 });
 
-/* ===== リスト用行など（テーマ対応） ===== */
+/* ===== リスト用行など（ダーク調整） ===== */
 export function DrawerRow({
   item,
   active,
@@ -336,7 +332,6 @@ export function DrawerRow({
   indent?: number;
   chevron?: 'right' | 'down' | null;
 }) {
-  const theme = useAppTheme();
   return (
     <Pressable
       onPress={() => onPress(item)}
@@ -344,10 +339,10 @@ export function DrawerRow({
         styles.row,
         {
           paddingLeft: 16 + indent,
-          backgroundColor: active ? `${theme.accent}29` : 'transparent',
+          backgroundColor: active ? 'rgba(96,165,250,0.16)' : 'transparent',
         },
       ]}
-      android_ripple={{ color: `${theme.accent}2E` }}
+      android_ripple={{ color: 'rgba(96,165,250,0.18)' }}
     >
       <View
         style={[
@@ -356,8 +351,8 @@ export function DrawerRow({
             width: DRAWER_ICON,
             height: DRAWER_ICON,
             borderRadius: DRAWER_ICON / 2,
-            backgroundColor: theme.surface,
-            borderColor: theme.border,
+            backgroundColor: SURFACE,
+            borderColor: BORDER_LINE,
           },
         ]}
       >
@@ -368,7 +363,7 @@ export function DrawerRow({
         numberOfLines={1}
         style={[
           styles.rowLabel,
-          { color: theme.textPrimary },
+          { color: active ? TEXT_PRIMARY : TEXT_PRIMARY },
           active && { fontWeight: '700' },
         ]}
       >
@@ -376,9 +371,7 @@ export function DrawerRow({
       </Text>
 
       {chevron ? (
-        <Text style={[styles.chevron, { color: theme.textSecondary }]}>
-          {chevron === 'down' ? '▾' : '▸'}
-        </Text>
+        <Text style={[styles.chevron, { color: TEXT_SECONDARY }]}>{chevron === 'down' ? '▾' : '▸'}</Text>
       ) : (
         <View style={{ width: 16 }} />
       )}
@@ -387,11 +380,10 @@ export function DrawerRow({
 }
 
 export function ProfileMenuRow({ icon, label, onPress }: { icon: string; label: string; onPress?: () => void }) {
-  const theme = useAppTheme();
   return (
-    <Pressable onPress={onPress} style={styles.profileMenuRow} android_ripple={{ color: `${theme.accent}2E` }}>
-      <Text style={[styles.profileMenuIcon, { color: theme.textPrimary }]}>{icon}</Text>
-      <Text style={[styles.profileMenuLabel, { color: theme.textPrimary }]}>{label}</Text>
+    <Pressable onPress={onPress} style={styles.profileMenuRow} android_ripple={{ color: 'rgba(96,165,250,0.18)' }}>
+      <Text style={[styles.profileMenuIcon, { color: TEXT_PRIMARY }]}>{icon}</Text>
+      <Text style={[styles.profileMenuLabel, { color: TEXT_PRIMARY }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -425,7 +417,9 @@ const styles = StyleSheet.create({
   rowIcon: {
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: SURFACE,
     borderWidth: 1,
+    borderColor: BORDER_LINE,
   },
   rowLabel: { flex: 1, fontSize: 15 },
   chevron: { fontSize: 16, marginLeft: 6 },

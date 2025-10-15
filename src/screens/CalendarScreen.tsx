@@ -32,9 +32,6 @@ import { useAnimatedDrawer } from './calendar/hooks/useAnimatedDrawer';
 import { useMonthEvents } from './calendar/hooks/useMonthEvents';
 import { styles } from './calendar/calendarStyles';
 
-// テーマ
-import { useAppTheme } from '../theme';
-
 // ローカル保存＆時間ユーティリティ
 import { loadLocalEvents, saveLocalEvent } from '../store/localEvents';
 import { fromUTC, startOfLocalDay, endOfLocalDay } from '../utils/time';
@@ -42,6 +39,16 @@ import { CALENDARS } from '../store/seeds';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Calendar'>;
 type SortMode = 'span' | 'start';
+
+/* ===== ダークテーマ用パレット（この画面だけで完結） ===== */
+const APP_BG        = '#0b1220'; // ページ背景
+const SURFACE       = '#111827'; // シート/カード面
+const BORDER        = '#334155'; // 仕切り線・枠
+const TEXT_PRIMARY  = '#e2e8f0'; // 主要文字色
+const TEXT_SECONDARY= '#94a3b8'; // 補助文字
+const ACCENT        = '#60a5fa'; // 強調（Pillなど）
+const ACCENT_TEXT   = '#0b1220'; // アクセント背景上の文字色
+const BG_SCRIM      = 'rgba(4,7,14,0.42)'; // 背景画像上の薄いスクリーン
 
 // ===== 新スキーマ: ローダ =====
 type ServerDocV2 = {
@@ -118,18 +125,17 @@ const FOLLOWS_FALLBACK: EntityItem[] = [
   { id: 'u3', label: 'Chris', emoji: '🎸',   kind: 'user' },
 ];
 
-// ステータスバッジ（テーマ依存）
+// 状態バッジ（ダーク仕様）
 function StatusBadge({ text }: { text: string }) {
-  const theme = useAppTheme();
   return (
     <View style={{
       position: 'absolute', right: 12, top: 8,
-      backgroundColor: theme.surface, paddingHorizontal: 10, paddingVertical: 6,
-      borderRadius: 9999, borderWidth: HAIR_SAFE, borderColor: theme.border,
+      backgroundColor: SURFACE, paddingHorizontal: 10, paddingVertical: 6,
+      borderRadius: 9999, borderWidth: HAIR_SAFE, borderColor: BORDER,
       shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 4 },
       elevation: 4, zIndex: 10,
     }}>
-      <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '700' }}>{text}</Text>
+      <Text style={{ color: TEXT_PRIMARY, fontSize: 12, fontWeight: '700' }}>{text}</Text>
     </View>
   );
 }
@@ -143,8 +149,6 @@ const dedupeKey = (ev: EventInstance) =>
   `${String(ev.calendar_id ?? '')}|${String(ev.title ?? '')}|${String(ev.start_at ?? '')}|${String(ev.end_at ?? '')}`;
 
 export default function CalendarScreen({ navigation }: Props) {
-  const theme = useAppTheme();
-
   // ===== 新スキーマロード =====
   const [{ server, prefs }, setAppData] = useState<{ server?: ServerDocV2; prefs?: ClientPrefsV1 }>({});
   const [schemaReady, setSchemaReady] = useState(false);
@@ -159,7 +163,7 @@ export default function CalendarScreen({ navigation }: Props) {
     return () => { alive = false; };
   }, []);
 
-  // 背景画像URI（prefs.calendars の最初の background_image を使用）
+  // ★ 背景画像URI（prefs.calendars の最初の background_image を使用）
   const bgImageUri = useMemo(() => {
     const all = Object.values(prefs?.calendars ?? {});
     const first = all.find(c => !!c?.background_image)?.background_image ?? null;
@@ -449,9 +453,9 @@ export default function CalendarScreen({ navigation }: Props) {
     const headerLeft = () => (
       <Pressable onPress={left.openDrawer} hitSlop={12} style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
         <View style={{ gap: 4 }}>
-          <View style={{ width: 20, height: 2, backgroundColor: theme.textPrimary, borderRadius: 1 }} />
-          <View style={{ width: 16, height: 2, backgroundColor: theme.textPrimary, borderRadius: 1 }} />
-          <View style={{ width: 20, height: 2, backgroundColor: theme.textPrimary, borderRadius: 1 }} />
+          <View style={{ width: 20, height: 2, backgroundColor: TEXT_PRIMARY, borderRadius: 1 }} />
+          <View style={{ width: 16, height: 2, backgroundColor: TEXT_PRIMARY, borderRadius: 1 }} />
+          <View style={{ width: 20, height: 2, backgroundColor: TEXT_PRIMARY, borderRadius: 1 }} />
         </View>
       </Pressable>
     );
@@ -459,8 +463,8 @@ export default function CalendarScreen({ navigation }: Props) {
       <Pressable onPress={right.openDrawer} hitSlop={10} style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
         <View style={{
           width: PROFILE_ICON_SIZE + 8, height: PROFILE_ICON_SIZE + 8,
-          borderRadius: (PROFILE_ICON_SIZE + 8) / 2, backgroundColor: theme.surface,
-          borderWidth: HAIR_SAFE, borderColor: theme.border, alignItems: 'center', justifyContent: 'center',
+          borderRadius: (PROFILE_ICON_SIZE + 8) / 2, backgroundColor: SURFACE,
+          borderWidth: HAIR_SAFE, borderColor: BORDER, alignItems: 'center', justifyContent: 'center',
         }}>
           <Text style={{ fontSize: 18 }}>🙂</Text>
         </View>
@@ -468,16 +472,16 @@ export default function CalendarScreen({ navigation }: Props) {
     );
 
     (navigation as any).setOptions({
-      headerStyle: { backgroundColor: theme.appBg },
+      headerStyle: { backgroundColor: APP_BG },
       headerTitleAlign: 'left',
       headerTitle: () => (
         <View style={styles.headerTitleRow}>
           {showEmoji ? (
-            <View style={[styles.headerEmojiCircle, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={[styles.headerEmojiCircle, { backgroundColor: SURFACE, borderColor: BORDER }]}>
               <Text style={styles.headerEmojiText}>👥</Text>
             </View>
           ) : null}
-          <Text style={[styles.headerTitleText, { color: theme.textPrimary }]} numberOfLines={1}>
+          <Text style={[styles.headerTitleText, { color: TEXT_PRIMARY }]} numberOfLines={1}>
             {selectedEntity.label}
           </Text>
         </View>
@@ -485,7 +489,7 @@ export default function CalendarScreen({ navigation }: Props) {
       headerLeft,
       headerRight,
     });
-  }, [navigation, selectedEntity, left.openDrawer, right.openDrawer, theme]);
+  }, [navigation, selectedEntity, left.openDrawer, right.openDrawer]);
 
   const marked = useMemo(() => ({ [selected]: { selected: true } }), [selected]);
 
@@ -522,7 +526,7 @@ export default function CalendarScreen({ navigation }: Props) {
   // CalendarList テーマ（背景画像がある時は透明化）
   const calendarTheme: any = useMemo(() => {
     const transparent = !!bgImageUri;
-    const bg = transparent ? 'transparent' : theme.appBg;
+    const bg = transparent ? 'transparent' : APP_BG;
     return {
       backgroundColor: bg,
       calendarBackground: bg,
@@ -540,7 +544,7 @@ export default function CalendarScreen({ navigation }: Props) {
       'stylesheet.calendar-list.main': { calendar: { paddingLeft: 0, paddingRight: 0, paddingTop: 0, marginTop: 0, backgroundColor: 'transparent' } },
       'stylesheet.calendar.header': { header: { marginBottom: 0, paddingVertical: 0, height: 0, backgroundColor: 'transparent' } },
     };
-  }, [bgImageUri, theme.appBg]);
+  }, [bgImageUri]);
 
   // DayCell（中日でも罫線を隠さない）
   const renderDay = useCallback(
@@ -658,19 +662,16 @@ export default function CalendarScreen({ navigation }: Props) {
     closeHelp();
   }, [currentMonth, formCalId, sheetDate, sheetVisible, closeHelp]);
 
-  // 背景（画像があれば透過、なければテーマの appBg）
-  const bgColor = bgImageUri ? 'transparent' : theme.appBg;
-  const bgScrim = bgImageUri
-    ? (theme.mode === 'dark' ? 'rgba(4,7,14,0.42)' : 'rgba(0,0,0,0.25)')
-    : 'transparent';
+  // ★ 背景色（画像があれば透過、なければダーク）
+  const bgColor = bgImageUri ? 'transparent' : APP_BG;
 
   return (
     <View style={[styles.container, { backgroundColor: bgColor }]}>
-      {/* 背景画像 & スクリーン */}
+      {/* ★ 背景画像 & スクリーン */}
       {bgImageUri ? (
         <>
           <Image source={{ uri: bgImageUri }} resizeMode="cover" style={StyleSheet.absoluteFillObject} />
-          <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: bgScrim }]} />
+          <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: BG_SCRIM }]} />
         </>
       ) : null}
 
@@ -682,7 +683,7 @@ export default function CalendarScreen({ navigation }: Props) {
 
       {/* カレンダー */}
       <View style={[styles.gridBlock, { backgroundColor: 'transparent' }]} onLayout={(e) => setGridH(Math.round(e.nativeEvent.layout.height))}>
-        {/* absolute 罫線（lineColor は calendarStyles 側でテーマ対応済み想定） */}
+        {/* absolute 罫線 */}
         <View style={styles.gridTopLine} />
         <View style={styles.gridLeftLine} />
 
@@ -690,22 +691,22 @@ export default function CalendarScreen({ navigation }: Props) {
           {/* 月タイトル */}
           <View style={{ height: MONTH_TITLE_HEIGHT, alignItems: 'center', justifyContent: 'center' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Text style={[styles.monthTitle, { color: theme.textPrimary }]}>{dayjs(currentMonth + '-01').format('YYYY MMM')}</Text>
+              <Text style={[styles.monthTitle, { color: TEXT_PRIMARY }]}>{dayjs(currentMonth + '-01').format('YYYY MMM')}</Text>
 
-              {/* ソートPill */}
+              {/* ソートPill：ダーク配色 */}
               <View style={[styles.sortPills, { backgroundColor: 'transparent' }]}>
                 <Pressable
                   onPress={() => setSortMode('span')}
                   style={[
                     styles.pill,
-                    { backgroundColor: theme.surface, borderColor: theme.border, borderWidth: HAIR_SAFE },
-                    sortMode === 'span' && { backgroundColor: theme.accent, borderColor: theme.accent }
+                    { backgroundColor: SURFACE, borderColor: BORDER, borderWidth: HAIR_SAFE },
+                    sortMode === 'span' && { backgroundColor: ACCENT, borderColor: ACCENT }
                   ]}
                 >
                   <Text style={[
                     styles.pillText,
-                    { color: theme.textSecondary, fontWeight: '700' },
-                    sortMode === 'span' && { color: theme.accentText }
+                    { color: TEXT_SECONDARY, fontWeight: '700' },
+                    sortMode === 'span' && { color: ACCENT_TEXT }
                   ]}>Span</Text>
                 </Pressable>
 
@@ -713,14 +714,14 @@ export default function CalendarScreen({ navigation }: Props) {
                   onPress={() => setSortMode('start')}
                   style={[
                     styles.pill,
-                    { backgroundColor: theme.surface, borderColor: theme.border, borderWidth: HAIR_SAFE },
-                    sortMode === 'start' && { backgroundColor: theme.accent, borderColor: theme.accent }
+                    { backgroundColor: SURFACE, borderColor: BORDER, borderWidth: HAIR_SAFE },
+                    sortMode === 'start' && { backgroundColor: ACCENT, borderColor: ACCENT }
                   ]}
                 >
                   <Text style={[
                     styles.pillText,
-                    { color: theme.textSecondary, fontWeight: '700' },
-                    sortMode === 'start' && { color: theme.accentText }
+                    { color: TEXT_SECONDARY, fontWeight: '700' },
+                    sortMode === 'start' && { color: ACCENT_TEXT }
                   ]}>Start</Text>
                 </Pressable>
               </View>
@@ -821,12 +822,12 @@ export default function CalendarScreen({ navigation }: Props) {
         hitSlop={10}
         style={{
           position: 'absolute', right: 18, bottom: 24, width: 56, height: 56, borderRadius: 28,
-          backgroundColor: theme.surface, alignItems: 'center', justifyContent: 'center',
+          backgroundColor: '#111827', alignItems: 'center', justifyContent: 'center',
           shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 4 },
-          elevation: 6, borderWidth: HAIR_SAFE, borderColor: theme.border,
+          elevation: 6, borderWidth: HAIR_SAFE, borderColor: '#0f172a',
         }}
       >
-        <Text style={{ color: theme.textPrimary, fontSize: 28, lineHeight: 28, marginTop: -2 }}>＋</Text>
+        <Text style={{ color: 'white', fontSize: 28, lineHeight: 28, marginTop: -2 }}>＋</Text>
       </Pressable>
 
       {/* 左下 ？ FAB */}
@@ -835,15 +836,15 @@ export default function CalendarScreen({ navigation }: Props) {
         hitSlop={10}
         style={{
           position: 'absolute', left: 18, bottom: 24, width: 44, height: 44, borderRadius: 22,
-          backgroundColor: theme.surface, alignItems: 'center', justifyContent: 'center',
+          backgroundColor: SURFACE, alignItems: 'center', justifyContent: 'center',
           shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
-          elevation: 4, borderWidth: HAIR_SAFE, borderColor: theme.border,
+          elevation: 4, borderWidth: HAIR_SAFE, borderColor: BORDER,
         }}
       >
-        <Text style={{ color: theme.textPrimary, fontSize: 20, lineHeight: 20 }}>?</Text>
+        <Text style={{ color: TEXT_PRIMARY, fontSize: 20, lineHeight: 20 }}>?</Text>
       </Pressable>
 
-      {/* 追加ボトムシート（テーマ配色） */}
+      {/* 追加ボトムシート（ダーク配色） */}
       {addVisible && (
         <Pressable
           onPress={() => { addSheetY.stopAnimation(); Animated.timing(addSheetY, { toValue: ADD_SHEET_H, duration: 220, useNativeDriver: true }).start(() => setAddVisible(false)); }}
@@ -853,62 +854,62 @@ export default function CalendarScreen({ navigation }: Props) {
             <Animated.View
               style={{
                 position: 'absolute', left: 0, right: 0, bottom: 0, height: ADD_SHEET_H,
-                backgroundColor: theme.surface, borderTopLeftRadius: 16, borderTopRightRadius: 16,
-                borderWidth: HAIR_SAFE, borderColor: theme.border, padding: 16,
+                backgroundColor: SURFACE, borderTopLeftRadius: 16, borderTopRightRadius: 16,
+                borderWidth: HAIR_SAFE, borderColor: BORDER, padding: 16,
                 transform: [{ translateY: addSheetY }],
               }}
             >
-              <View style={{ width: 42, height: 4, borderRadius: 2, backgroundColor: theme.border, alignSelf: 'center', marginBottom: 12 }} />
-              <Text style={{ fontSize: 18, fontWeight: '800', marginBottom: 12, color: theme.textPrimary }}>Add Event (Local JSON)</Text>
+              <View style={{ width: 42, height: 4, borderRadius: 2, backgroundColor: BORDER, alignSelf: 'center', marginBottom: 12 }} />
+              <Text style={{ fontSize: 18, fontWeight: '800', marginBottom: 12, color: TEXT_PRIMARY }}>Add Event (Local JSON)</Text>
 
-              <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Title</Text>
+              <Text style={{ fontSize: 12, color: TEXT_SECONDARY, marginBottom: 6 }}>Title</Text>
               <TextInput
                 value={formTitle}
                 onChangeText={setFormTitle}
                 placeholder="e.g. Meeting"
-                placeholderTextColor={theme.textSecondary}
-                selectionColor={theme.accent}
+                placeholderTextColor={TEXT_SECONDARY}
+                selectionColor={ACCENT}
                 style={{
-                  borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                  borderWidth: HAIR_SAFE, borderColor: BORDER, borderRadius: 10,
                   paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
-                  color: theme.textPrimary, backgroundColor: theme.appBg,
+                  color: TEXT_PRIMARY, backgroundColor: APP_BG,
                 }}
               />
 
-              <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Start (YYYY-MM-DD HH:mm)</Text>
+              <Text style={{ fontSize: 12, color: TEXT_SECONDARY, marginBottom: 6 }}>Start (YYYY-MM-DD HH:mm)</Text>
               <TextInput
                 value={formStart}
                 onChangeText={setFormStart}
                 placeholder="2025-10-06 10:00"
-                placeholderTextColor={theme.textSecondary}
-                selectionColor={theme.accent}
+                placeholderTextColor={TEXT_SECONDARY}
+                selectionColor={ACCENT}
                 style={{
-                  borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                  borderWidth: HAIR_SAFE, borderColor: BORDER, borderRadius: 10,
                   paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
-                  color: theme.textPrimary, backgroundColor: theme.appBg,
+                  color: TEXT_PRIMARY, backgroundColor: APP_BG,
                 }}
               />
 
-              <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>End (YYYY-MM-DD HH:mm)</Text>
+              <Text style={{ fontSize: 12, color: TEXT_SECONDARY, marginBottom: 6 }}>End (YYYY-MM-DD HH:mm)</Text>
               <TextInput
                 value={formEnd}
                 onChangeText={setFormEnd}
                 placeholder="2025-10-06 11:00"
-                placeholderTextColor={theme.textSecondary}
-                selectionColor={theme.accent}
+                placeholderTextColor={TEXT_SECONDARY}
+                selectionColor={ACCENT}
                 style={{
-                  borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                  borderWidth: HAIR_SAFE, borderColor: BORDER, borderRadius: 10,
                   paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
-                  color: theme.textPrimary, backgroundColor: theme.appBg,
+                  color: TEXT_PRIMARY, backgroundColor: APP_BG,
                 }}
               />
 
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
                 <Pressable
                   onPress={() => { addSheetY.stopAnimation(); Animated.timing(addSheetY, { toValue: ADD_SHEET_H, duration: 220, useNativeDriver: true }).start(() => setAddVisible(false)); }}
-                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, backgroundColor: theme.border }}
+                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, backgroundColor: BORDER }}
                 >
-                  <Text style={{ fontWeight: '700', color: theme.textPrimary }}>Cancel</Text>
+                  <Text style={{ fontWeight: '700', color: TEXT_PRIMARY }}>Cancel</Text>
                 </Pressable>
 
                 <Pressable
@@ -937,9 +938,9 @@ export default function CalendarScreen({ navigation }: Props) {
                     } finally { setIsSaving(false); savingRef.current = false; }
                   }}
                   disabled={isSaving}
-                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, backgroundColor: isSaving ? theme.border : theme.accent }}
+                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, backgroundColor: isSaving ? BORDER : ACCENT }}
                 >
-                  <Text style={{ color: isSaving ? theme.textSecondary : theme.accentText, fontWeight: '800' }}>
+                  <Text style={{ color: isSaving ? TEXT_SECONDARY : ACCENT_TEXT, fontWeight: '800' }}>
                     {isSaving ? 'Saving…' : 'Save'}
                   </Text>
                 </Pressable>
