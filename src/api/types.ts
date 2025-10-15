@@ -43,14 +43,7 @@ export type Event = {
   event_id: ULID;
   calendar_id: ULID;
   title: string;
-  description?: string | null;
-
-  /** 既存UI互換：終日フラグ */
-  is_all_day: boolean;
-
-  /** 既存UI互換：表示用TZ */
-  tz: string;
-
+  summary?: string | null;
   /** 既存UI互換：ISO8601日時（例: 2025-10-08T09:30:00+09:00） */
   start_at: string;
   end_at: string;
@@ -192,7 +185,7 @@ export type EventOverrideV2 = {
   occurrence_date: string; // YYYY-MM-DD
   cancelled?: boolean;     // trueなら他フィールド無視
   title?: string;
-  description?: string;
+  summary?: string;
   start_at?: string;       // HH:mm
   end_at?: string;         // HH:mm
   priority?: 'low' | 'normal' | 'high';
@@ -204,7 +197,7 @@ export type EventV2 = {
   event_id: string;
   calendar_id: string;
   title: string;
-  description?: string | null;
+  summary?: string | null;
   /** 開始/終了時刻（ローカル時刻の HH:mm 表記） */
   start_at: string; // e.g. "09:30"
   end_at: string;   // e.g. "10:30"
@@ -247,7 +240,7 @@ export type EventTagV2 = {
 export type PlanV2 = {
   plan_code: string; // "free" など
   name: string;
-  description?: string | null;
+  summary?: string | null;
   max_group_members_per_group: number;
   max_groups_per_owner: number;
   max_calendars_per_owner: number;

@@ -1,6 +1,6 @@
 // src/screens/CalendarScreen.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from 'react';
-import { View, Text, Pressable, Platform, TextInput, KeyboardAvoidingView, Animated, Image, StyleSheet } from 'react-native';
+import { View, Text, Pressable, Platform, TextInput, KeyboardAvoidingView, Animated, Image, StyleSheet, Switch } from 'react-native';
 import type { AppStateStatus } from 'react-native';
 import { CalendarList } from 'react-native-calendars';
 import { Calendar as MiniCalendar } from 'react-native-calendars';
@@ -234,11 +234,17 @@ export default function CalendarScreen({ navigation }: Props) {
 
   // 追加用ボトムシート
   const [addVisible, setAddVisible] = useState(false);
-  const ADD_SHEET_H = Math.floor(SCREEN_H * 0.65);
+  const ADD_SHEET_H = Math.floor(SCREEN_H * 0.72);
   const addSheetY = useRef(new Animated.Value(ADD_SHEET_H)).current;
 
   // 追加フォーム（開始日/終了日＋時刻）
   const [formTitle, setFormTitle] = useState('');
+  const [formSummary, setFormSummary] = useState('');       // メモ/説明
+  const [formAllDay, setFormAllDay] = useState(false);      // 終日
+  const [formColor, setFormColor] = useState<string>('');   // #HEX
+  const [tags, setTags] = useState<string[]>([]);           // タグ
+  const [tagInput, setTagInput] = useState('');             // タグ入力
+
   const [startDate, setStartDate] = useState<string>(dayjs().format('YYYY-MM-DD'));
   const [endDate, setEndDate]     = useState<string>(dayjs().format('YYYY-MM-DD'));
   const [startTime, setStartTime] = useState<string>('10:00');
@@ -569,6 +575,28 @@ export default function CalendarScreen({ navigation }: Props) {
     ? (theme.mode === 'dark' ? 'rgba(4,7,14,0.42)' : 'rgba(0,0,0,0.25)')
     : 'transparent';
 
+  // ====== タグ操作 ======
+  const addTag = useCallback(() => {
+    const t = tagInput.trim();
+    if (!t) return;
+    if (tags.includes(t)) { setTagInput(''); return; }
+    setTags((prev) => [...prev, t]);
+    setTagInput('');
+  }, [tagInput, tags]);
+
+  const removeTag = useCallback((t: string) => {
+    setTags((prev) => prev.filter(x => x !== t));
+  }, []);
+
+  // All day 切替時に時間を自動補正（UX向上、保存時も念のため補正）
+  const onToggleAllDay = useCallback((v: boolean) => {
+    setFormAllDay(v);
+    if (v) {
+      setStartTime('00:00');
+      setEndTime('23:59');
+    }
+  }, []);
+
   return (
     <View style={[styles.container, { backgroundColor: bgColor }]}>
       {/* 背景画像 & スクリーン */}
@@ -711,6 +739,12 @@ export default function CalendarScreen({ navigation }: Props) {
       <Pressable
         onPress={() => {
           setFormTitle('');
+          setFormSummary('');
+          setFormAllDay(false);
+          setFormColor('');
+          setTags([]);
+          setTagInput('');
+
           setStartDate(selected);
           setEndDate(selected);
           setStartTime('10:00');
@@ -766,6 +800,47 @@ export default function CalendarScreen({ navigation }: Props) {
                 }}
               />
 
+              {/* 説明/メモ（summary） */}
+              <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Summary / Notes</Text>
+              <TextInput
+                value={formSummary}
+                onChangeText={setFormSummary}
+                placeholder="optional description"
+                placeholderTextColor={theme.textSecondary}
+                selectionColor={theme.accent}
+                multiline
+                style={{
+                  borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                  paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, marginBottom: 12,
+                  minHeight: 68, color: theme.textPrimary, backgroundColor: theme.appBg,
+                }}
+              />
+
+              {/* 色（#HEX）＋ 終日 */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Color (#HEX)</Text>
+                  <TextInput
+                    value={formColor}
+                    onChangeText={setFormColor}
+                    autoCapitalize="none"
+                    placeholder="#2563EB"
+                    placeholderTextColor={theme.textSecondary}
+                    selectionColor={theme.accent}
+                    style={{
+                      borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                      paddingHorizontal: 12, paddingVertical: 10, fontSize: 16,
+                      color: theme.textPrimary, backgroundColor: theme.appBg,
+                    }}
+                  />
+                </View>
+
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={{ color: theme.textPrimary, fontWeight: '700' }}>All day</Text>
+                  <Switch value={formAllDay} onValueChange={onToggleAllDay} />
+                </View>
+              </View>
+
               {/* ===== 開始日/終了日（タップでポップアップ） ===== */}
               <View style={{ marginBottom: 12 }}>
                 <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Dates</Text>
@@ -801,45 +876,88 @@ export default function CalendarScreen({ navigation }: Props) {
                 </View>
               </View>
 
-              {/* ===== 時刻入力（HH:mm） ===== */}
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>
-                    Start time (HH:mm)
-                  </Text>
-                  <TextInput
-                    value={startTime}
-                    onChangeText={setStartTime}
-                    placeholder="10:00"
-                    keyboardType="numbers-and-punctuation"
-                    placeholderTextColor={theme.textSecondary}
-                    selectionColor={theme.accent}
-                    style={{
-                      borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
-                      paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
-                      color: theme.textPrimary, backgroundColor: theme.appBg,
-                    }}
-                  />
-                </View>
+              {/* ===== 時刻入力（HH:mm） — All day OFF の時だけ表示 ===== */}
+              {!formAllDay && (
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>
+                      Start time (HH:mm)
+                    </Text>
+                    <TextInput
+                      value={startTime}
+                      onChangeText={setStartTime}
+                      placeholder="10:00"
+                      keyboardType="numbers-and-punctuation"
+                      placeholderTextColor={theme.textSecondary}
+                      selectionColor={theme.accent}
+                      style={{
+                        borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                        paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
+                        color: theme.textPrimary, backgroundColor: theme.appBg,
+                      }}
+                    />
+                  </View>
 
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>
-                    End time (HH:mm)
-                  </Text>
-                  <TextInput
-                    value={endTime}
-                    onChangeText={setEndTime}
-                    placeholder="11:00"
-                    keyboardType="numbers-and-punctuation"
-                    placeholderTextColor={theme.textSecondary}
-                    selectionColor={theme.accent}
-                    style={{
-                      borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
-                      paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
-                      color: theme.textPrimary, backgroundColor: theme.appBg,
-                    }}
-                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>
+                      End time (HH:mm)
+                    </Text>
+                    <TextInput
+                      value={endTime}
+                      onChangeText={setEndTime}
+                      placeholder="11:00"
+                      keyboardType="numbers-and-punctuation"
+                      placeholderTextColor={theme.textSecondary}
+                      selectionColor={theme.accent}
+                      style={{
+                        borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                        paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
+                        color: theme.textPrimary, backgroundColor: theme.appBg,
+                      }}
+                    />
+                  </View>
                 </View>
+              )}
+
+              {/* ===== タグ ===== */}
+              <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Tags</Text>
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                {tags.map((t) => (
+                  <Pressable
+                    key={t}
+                    onPress={() => removeTag(t)}
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 6,
+                      paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9999,
+                      backgroundColor: `${theme.accent}22`, borderWidth: HAIR_SAFE, borderColor: theme.accent
+                    }}
+                  >
+                    <Text style={{ color: theme.textPrimary, fontWeight: '700' }}>#{t}</Text>
+                    <Text style={{ color: theme.accent }}>×</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                <TextInput
+                  value={tagInput}
+                  onChangeText={setTagInput}
+                  onSubmitEditing={addTag}
+                  placeholder="タグを入力して Enter"
+                  placeholderTextColor={theme.textSecondary}
+                  selectionColor={theme.accent}
+                  style={{
+                    flex: 1,
+                    borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                    paddingHorizontal: 12, paddingVertical: 10, fontSize: 16,
+                    color: theme.textPrimary, backgroundColor: theme.appBg,
+                  }}
+                />
+                <Pressable
+                  onPress={addTag}
+                  style={{ paddingHorizontal: 14, borderRadius: 10, backgroundColor: theme.accent, justifyContent: 'center' }}
+                >
+                  <Text style={{ color: theme.accentText, fontWeight: '800' }}>Add</Text>
+                </Pressable>
               </View>
 
               {/* ===== 日付ポップアップ（ミニカレンダー） ===== */}
@@ -927,8 +1045,10 @@ export default function CalendarScreen({ navigation }: Props) {
                         const mm = String(Math.max(0, Math.min(59, Number(m[2])))).padStart(2, '0');
                         return `${hh}:${mm}`;
                       };
-                      const st = norm(startTime);
-                      const et = norm(endTime);
+
+                      // 終日のときは 00:00–23:59 に強制（保存時も確実に補正）
+                      const st = formAllDay ? '00:00' : norm(startTime);
+                      const et = formAllDay ? '23:59' : norm(endTime);
                       if (!st || !et) return;
 
                       // 念のため保存直前にも「終了日 < 開始日」を補正
@@ -939,12 +1059,20 @@ export default function CalendarScreen({ navigation }: Props) {
                       const startIso = dayjs(`${sDate} ${st}`).format('YYYY-MM-DD HH:mm');
                       const endIso   = dayjs(`${eDate} ${et}`).format('YYYY-MM-DD HH:mm');
 
-                      // 完全な前後反転（日時）も弾く（同一日時もNGにする場合は >= に変更）
+                      // 完全な前後反転（日時）も弾く
                       if (!dayjs(endIso).isAfter(dayjs(startIso))) return;
 
-                      createEventLocal({
+                      // color 入力は #HEX 簡易バリデーション
+                      const color = (formColor || '').trim();
+                      const validColor = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(color) ? color : undefined;
+
+                      // === 保存 ===
+                      await createEventLocal({
                         calendar_id: formCalId,
                         title: formTitle.trim(),
+                        summary: formSummary.trim(),
+                        color: validColor,
+                        style: tags.length ? { tags } : undefined, // タグは style.tags に格納
                         start_at: startIso, // ローカルISO（toUTCは内部で処理）
                         end_at:   endIso,
                       });
