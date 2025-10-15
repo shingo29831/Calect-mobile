@@ -26,7 +26,32 @@ adb uninstall com.calect
 npx react-native run-android
 
 
-
+/src
+  /features
+    /calendar
+      /screens
+        CalendarScreen.tsx
+      /ui
+        CalendarParts.tsx       // WeekHeader等を吸収した軽量UI集約
+      /components
+        DayCell.tsx
+        DayEventsSheet.tsx      // or EventModal.tsx のどちらか
+        LeftDrawer.tsx          // ProfileDrawer統合済
+        DebugHUD.tsx            // __DEV__のみ
+      index.ts                  // 再エクスポート集約（下にサンプル）
+  /store                        // 共有データ層（機能横断）
+    db.ts
+    monthShard.ts
+    localFile.ts
+    filePaths.ts
+    sync.ts
+    syncQueue.ts
+    storage.ts                  // appData.tsの役割もここに集約
+  /types
+    localTypes.ts
+  /app                          // アプリ全体の共通
+    bootstrap.ts
+    // （任意）utils/logger.ts, utils/result.ts, ui/tokens.ts など
 
 JSON形式
 

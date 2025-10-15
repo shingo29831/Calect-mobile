@@ -1,172 +1,164 @@
 // src/store/db.ts
+// ===============================================
+// 単純メモリDB + ローカル保存（snapshot / ops.ndjson）
+// - createEventLocal: 追加直後に非同期でローカル保存
+// - replaceAllInstances: 同期などでインメモリを丸ごと差し替え
+// - listInstancesByDate: 指定日のインスタンスを取得
+// - 変更通知: subscribeDb / unsubscribeDb / emit
+// ===============================================
+
 import dayjs from '../lib/dayjs';
-import type { Event, EventInstance, ULID } from '../api/types';
-import { SEED } from './seeds';
-import { fromUTC, startOfLocalDay, endOfLocalDay, toUTCISO } from '../utils/time';
+import type { EventInstance, Event, ULID } from '../api/types';
+import { startOfLocalDay, endOfLocalDay } from '../utils/time';
+import { loadLocalStore, saveLocalStore, appendOps } from './localFile';
 
-// ★ 追加：月別シャードローダ（必要月だけロード）
-import { getByDatesWithEnsure } from './monthShard';
-
-// --- 依存なしの簡易 26 桁 Base32 ID ジェネレーター（ULID風の見た目） ---
+// ====== ULID 生成（Event.event_id 用） ======
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-function makeId(len = 26): ULID {
+function makeUlid(len = 26): ULID {
   let out = '';
-  for (let i = 0; i < len; i++) {
-    out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
-  }
+  for (let i = 0; i < len; i++) out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
   return out as ULID;
 }
 
-// メモリ上のインスタンス（UTC保存）
-let instances: EventInstance[] = [...SEED.instances];
-
-/* =========================================================
- * by-date キャッシュ（従来同期版のために維持）
- *   - キー: JSON.stringify({ d, calIds })
- *   - 値: その日の EventInstance[]
- * =======================================================*/
-const _byDateCache = new Map<string, EventInstance[]>();
-const _ck = (d: string, calendarIds?: string[]) =>
-  JSON.stringify({ d, calIds: calendarIds?.slice().sort() ?? null });
-
-export function clearByDateCache() {
-  _byDateCache.clear();
+// ====== instance_id（number）生成器（同ミリ秒でも一意化） ======
+let __lastMs = 0;
+let __seq = 0;
+function makeInstanceId(): number {
+  const now = Date.now();
+  if (now === __lastMs) {
+    __seq++;
+  } else {
+    __lastMs = now;
+    __seq = 0;
+  }
+  // 同一ms内で最大1000件まで確実にユニーク（ms * 1000 + seq）
+  return now * 1000 + __seq;
 }
 
-/* =========================================================
- * 従来API：1日分（内部では範囲検索を使用）※同期版
- * =======================================================*/
-export function listInstancesByDate(dateISO: string, calendarIds?: string[]): EventInstance[] {
-  const dayStart = startOfLocalDay(dateISO); // dayjs(ローカルTZ)
-  const dayEnd   = endOfLocalDay(dateISO);   // dayjs(ローカルTZ)
-  const rows = listInstancesInRange(dayStart.toISOString(), dayEnd.toISOString());
-  if (calendarIds?.length) {
-    const set = new Set(calendarIds);
-    return rows.filter(r => set.has(r.calendar_id));
-  }
+// ====== メモリ上のインスタンス配列 ======
+let instances: EventInstance[] = [];
+
+// ====== 変更通知（購読） ======
+type Listener = () => void;
+const listeners = new Set<Listener>();
+function emitDbChanged() {
+  for (const l of [...listeners]) { try { l(); } catch {} }
+}
+export function subscribeDb(cb: Listener) {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+export function unsubscribeDb(cb: Listener) {
+  listeners.delete(cb);
+}
+
+// ====== 日別キャッシュ ======
+const byDateCache = new Map<string, EventInstance[]>();
+function clearByDateCache() { byDateCache.clear(); }
+
+// 指定日のインスタンス列挙（ローカル日の 00:00〜23:59:59 に少しでもかかるもの）
+export function listInstancesByDate(dateISO: string): EventInstance[] {
+  const key = dayjs(dateISO).format('YYYY-MM-DD');
+  const cached = byDateCache.get(key);
+  if (cached) return cached;
+
+  const start = startOfLocalDay(dateISO);
+  const end = endOfLocalDay(dateISO);
+  const sMs = dayjs(start).valueOf();
+  const eMs = dayjs(end).valueOf();
+
+  const rows = instances.filter((ins) => {
+    const a = dayjs(ins.start_at).valueOf();
+    const b = dayjs(ins.end_at).valueOf();
+    return !(b < sMs || a > eMs); // 1msでも重なれば含める
+  });
+
+  byDateCache.set(key, rows);
   return rows;
 }
 
-/* =========================================================
- * 従来API：範囲検索（ローカルTZ基準で重なり判定）※同期版
- *   条件: s < rangeEnd && (e > rangeStart || e == rangeStart)
- * =======================================================*/
-export function listInstancesInRange(startISO: string, endISO: string): EventInstance[] {
-  const rangeStart = dayjs(startISO);
-  const rangeEnd   = dayjs(endISO);
-
-  return instances.filter((i) => {
-    const s = fromUTC(i.start_at); // UTC → 端末TZ
-    const e = fromUTC(i.end_at);
-    return s.isBefore(rangeEnd) && (e.isAfter(rangeStart) || e.isSame(rangeStart));
-  });
-}
-
-/* =========================================================
- * 従来API：複数日を by-date 参照（キャッシュ有り）※同期版
- *   - 既存コード互換のために残す
- *   - ファイルI/Oを伴わない現在メモリにある instances を対象
- * =======================================================*/
-export function listInstancesByDates(
-  dates: string[],
-  calendarIds?: string[]
-): Record<string, EventInstance[]> {
-  const out: Record<string, EventInstance[]> = {};
-  const useFilter = !!(calendarIds && calendarIds.length);
-  const calSet = useFilter ? new Set(calendarIds) : null;
-
-  for (const d of dates) {
-    const key = _ck(d, useFilter ? calendarIds : undefined);
-    let rows = _byDateCache.get(key);
-
-    if (!rows) {
-      // 1日分を通常APIで算出（start/end 境界は内部で考慮）
-      rows = listInstancesByDate(d, useFilter ? calendarIds : undefined) ?? [];
-      _byDateCache.set(key, rows);
-    }
-
-    // 追加のフィルタがあればここで（キーに calIds を入れているので通常不要）
-    out[d] = useFilter ? rows.filter(r => calSet!.has(r.calendar_id)) : rows;
-  }
-
-  return out;
-}
-
-/* =========================================================
- * 新API：複数日を「必要な月だけファイルからロード」して取得 ※非同期版
- *   - 画面側でこちらに移行すると、巨大JSONの一括読みを回避できる
- *   - 呼び出し箇所は await が必要（useMonthEvents 側を async 化）
- * =======================================================*/
-export async function listInstancesByDatesAsync(
-  dates: string[],
-  calendarIds?: string[]
-): Promise<Record<string, EventInstance[]>> {
-  // ① 表示に必要な月だけを ensure → 月キャッシュから該当日の配列を作成
-  const raw = await getByDatesWithEnsure(dates);
-
-  // ② 既存のカレンダーフィルタはそのまま適用
-  if (calendarIds?.length) {
-    const set = new Set(calendarIds);
-    for (const d of dates) {
-      raw[d] = (raw[d] ?? []).filter(r => set.has(r.calendar_id));
-    }
-  }
-  return raw;
-}
-
-/* =========================================================
- * 既存API：ローカル作成（保存はUTC化）
- *   - 追加後に by-date キャッシュをクリアして整合性を保つ
- *   - ※ファイル保存は localFile / monthShard 側で必要に応じて行ってください
- * =======================================================*/
-export function createEventLocal(input: {
-  title: string;
-  start_at: string; // ローカルISO
-  end_at: string;   // ローカルISO
-  calendar_id?: ULID;
-}): Event {
-  const ev: Event = {
-    event_id: makeId(),
-    calendar_id: input.calendar_id || SEED.calendar.calendar_id,
-    title: input.title || 'Untitled',
-    description: null,
-    is_all_day: false,
-    tz: 'Asia/Tokyo',
-    start_at: toUTCISO(input.start_at), // UTC保存
-    end_at:   toUTCISO(input.end_at),   // UTC保存
-    visibility: 'inherit',
-  };
-
-  // 表示用のインスタンスも即時追加（UTCのまま保存）
-  const inst: EventInstance = {
-    instance_id: Date.now(),
-    calendar_id: ev.calendar_id,
+// ====== Event -> 最小 EventInstance（単発用） ======
+function eventToSingleInstance(ev: Event): EventInstance {
+  return {
+    instance_id: makeInstanceId(),           // number に統一（types.ts v2）
     event_id: ev.event_id,
+    calendar_id: ev.calendar_id,
     title: ev.title,
     start_at: ev.start_at,
     end_at: ev.end_at,
   };
-  instances.push(inst);
-
-  // 追加したのでキャッシュ破棄（安全側）
-  clearByDateCache();
-
-  return ev;
 }
 
-/* =========================================================
- * 公開API：全置換（同期後にメモリDBを一括差し替え）
- *   - ローカル/サーバ同期の結果を UI へ即時反映させる用途
- *   - 差し替え後に by-date キャッシュをクリア
- * =======================================================*/
+// ====== 公開API：イベント追加（ローカル保存も行う） ======
+export type CreateEventInput = {
+  // 必須（UIから来る最小情報）
+  title: string;
+  start_at: string; // ISO
+  end_at: string;   // ISO
+  // 任意（省略時は安全なデフォルト）
+  calendar_id?: string;          // 既定: 'CAL_LOCAL_DEFAULT'
+  is_all_day?: boolean;          // 既定: false
+  tz?: string;                   // 既定: 'Asia/Tokyo'
+  visibility?: Event['visibility']; // 既定: 'private'
+};
+
+export async function createEventLocal(input: CreateEventInput): Promise<EventInstance> {
+  const nowIso = new Date().toISOString();
+
+  // types.ts v2 の Event 必須項目をすべて満たす（最小 & デフォルト埋め）
+  const ev: Event = {
+    event_id: makeUlid(),
+    calendar_id: (input.calendar_id ?? 'CAL_LOCAL_DEFAULT') as ULID,
+    title: input.title,
+    description: null,
+    is_all_day: !!input.is_all_day,
+    tz: input.tz ?? 'Asia/Tokyo',
+    start_at: input.start_at,
+    end_at: input.end_at,
+    visibility: input.visibility ?? 'private',
+  };
+
+  const inst = eventToSingleInstance(ev);
+
+  // メモリへ反映
+  instances.push(inst);
+  clearByDateCache();
+  emitDbChanged();
+
+  // === 非同期でローカル保存（snapshot + ops） ===
+  (async () => {
+    try {
+      const store = await loadLocalStore();
+      const i = store.instances.findIndex(r => r.instance_id === inst.instance_id);
+      if (i >= 0) store.instances[i] = inst;
+      else store.instances.push(inst);
+
+      await saveLocalStore(store);
+
+      await appendOps([
+        { type: 'upsert', entity: 'instance', row: inst, updated_at: nowIso }
+      ]);
+    } catch (e) {
+      if (__DEV__) console.warn('[createEventLocal] persist failed:', e);
+    }
+  })();
+
+  return inst;
+}
+
+// ====== 公開API：インメモリ差し替え（同期時など） ======
 export function replaceAllInstances(next: EventInstance[]) {
   instances = [...next];
   clearByDateCache();
+  emitDbChanged();
 }
 
-/* 便利：テスト時にリセットしたい場合は下を使う（必要なら export に変更）
-function _resetInstances(next: EventInstance[]) {
-  instances = [...next];
-  clearByDateCache();
+// ====== 便利関数：全件取得・クリア（デバッグ用） ======
+export function getAllInstances(): EventInstance[] {
+  return [...instances];
 }
-*/
+export function __clearAllInstancesForTest() {
+  instances = [];
+  clearByDateCache();
+  emitDbChanged();
+}

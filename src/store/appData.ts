@@ -142,7 +142,7 @@ export const prefs: ClientPrefsV1 | undefined = {
     // あなたのアプリ側でデフォルト利用しているIDに合わせておくと拾われます
     // （例：CAL_LOCAL_DEFAULT）
     CAL_LOCAL_DEFAULT: {
-      // ▼ 好きな画像URLに差し替えてOK（https/file/content スキーム対応）
+    //   // ▼ 好きな画像URLに差し替えてOK（https/file/content スキーム対応）
     //   background_image:
     //     'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?q=80&w=1600&auto=format&fit=crop',
       icon_image_path:

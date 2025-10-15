@@ -5,10 +5,9 @@ import type { AppStateStatus } from 'react-native';
 import { CalendarList } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
 import dayjs from '../lib/dayjs';
-import { listInstancesByDate } from '../store/db';
+import { listInstancesByDate, createEventLocal } from '../store/db';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation';
-import type { EventInstance } from '../api/types';
 
 import {
   EntityItem,
@@ -34,11 +33,6 @@ import { styles } from './calendar/calendarStyles';
 
 // テーマ
 import { useAppTheme } from '../theme';
-
-// ローカル保存＆時間ユーティリティ
-import { loadLocalEvents, saveLocalEvent } from '../store/localEvents';
-import { fromUTC, startOfLocalDay, endOfLocalDay } from '../utils/time';
-import { CALENDARS } from '../store/seeds';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Calendar'>;
 type SortMode = 'span' | 'start';
@@ -134,14 +128,6 @@ function StatusBadge({ text }: { text: string }) {
   );
 }
 
-// EventInstance -> DayCell 変換（最小）
-type EventSegmentMinimal = EventInstance & { spanLeft: boolean; spanRight: boolean };
-const toLocalSegment = (ev: EventInstance): EventSegmentMinimal => ({ ...ev, spanLeft: false, spanRight: false });
-
-// 重複キー
-const dedupeKey = (ev: EventInstance) =>
-  `${String(ev.calendar_id ?? '')}|${String(ev.title ?? '')}|${String(ev.start_at ?? '')}|${String(ev.end_at ?? '')}`;
-
 export default function CalendarScreen({ navigation }: Props) {
   const theme = useAppTheme();
 
@@ -226,8 +212,7 @@ export default function CalendarScreen({ navigation }: Props) {
   const [weekHeaderH, setWeekHeaderH] = useState<number>(0);
   const SHEET_H = Math.floor(SCREEN_H * 0.6);
 
-  // 段階ロード状態
-  const [localLoaded, setLocalLoaded] = useState(false);
+  // DB準備フラグ
   const [dbReady, setDbReady] = useState(false);
 
   // ✅ 同期制御（タイムアウト強制終了に対応）
@@ -251,32 +236,17 @@ export default function CalendarScreen({ navigation }: Props) {
   const ADD_SHEET_H = Math.floor(SCREEN_H * 0.65);
   const addSheetY = useRef(new Animated.Value(ADD_SHEET_H)).current;
 
-  // 使い方 / テスト投入
-  const [helpVisible, setHelpVisible] = useState(false);
-  const HELP_SHEET_H = Math.floor(SCREEN_H * 0.62);
-  const helpSheetY = useRef(new Animated.Value(HELP_SHEET_H)).current;
-
   // 追加フォーム
   const [formTitle, setFormTitle] = useState('');
   const [formStart, setFormStart] = useState<string>(dayjs().format('YYYY-MM-DD HH:mm'));
   const [formEnd, setFormEnd] = useState<string>(dayjs().add(1, 'hour').format('YYYY-MM-DD HH:mm'));
 
-  // 初期カレンダー
-  const [formCalId, setFormCalId] = useState<string>(() => {
-    const list = Array.isArray(CALENDARS) ? CALENDARS : [];
-    return (
-      list.find(c => c?.name?.includes('My: Private'))?.calendar_id ??
-      list[0]?.calendar_id ??
-      'CAL_LOCAL_DEFAULT'
-    );
-  });
+  // seeds.ts を削除したため、デフォルトのカレンダーIDのみ使用
+  const DEFAULT_CAL_ID = 'CAL_LOCAL_DEFAULT';
+  const [formCalId, setFormCalId] = useState<string>(DEFAULT_CAL_ID);
 
-  // ローカルイベント（日付別）
-  const [localByDate, setLocalByDate] = useState<Record<string, EventInstance[]>>({});
-
-  // 二重保存ロック
-  const [isSaving, setIsSaving] = useState(false);
-  const savingRef = useRef(false);
+  // 月グリッド再計算用キー（作成直後の反映に必須）
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const initialCurrent = useRef(dayjs().startOf('month').format('YYYY-MM-DD')).current;
 
@@ -356,38 +326,13 @@ export default function CalendarScreen({ navigation }: Props) {
   const { eventsByDate, overflowByDate } = useMonthEvents(
     enabledMonthDates,
     filterEventsByEntity,
-    sortMode
+    sortMode,
+    refreshKey // ← 直後反映のために依存させる
   );
-
-  // ローカル読み込み（ calReady を待たない ）
-  useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      await new Promise<void>((r) => requestAnimationFrame(() => r()));
-      const list = await loadLocalEvents();
-      if (monthDates.length === 0) return;
-      const monthStart = startOfLocalDay(monthDates[0]);
-      const monthEnd   = endOfLocalDay(monthDates[monthDates.length - 1]);
-      const map: Record<string, EventInstance[]> = {};
-      for (const ev of list) {
-        const s = fromUTC(ev.start_at); const e = fromUTC(ev.end_at);
-        const clipStart = s.isAfter(monthStart) ? s : monthStart;
-        const clipEnd   = e.isBefore(monthEnd) ? e : monthEnd;
-        if (clipEnd.isBefore(clipStart)) continue;
-        let d = clipStart.startOf('day'); const endDay = clipEnd.startOf('day');
-        while (d.isBefore(endDay) || d.isSame(endDay)) {
-          const key = d.format('YYYY-MM-DD'); (map[key] ||= []).push(ev); d = d.add(1, 'day');
-        }
-      }
-      if (!cancelled) { setLocalByDate(map); setLocalLoaded(true); }
-    };
-    run();
-    return () => { cancelled = true; setLocalLoaded(false); };
-  }, [deferredMonth, monthDates]);
 
   // ===== DB同期（タイムアウトで"確実に"打ち切る：ランIDでレース無効化） =====
   useEffect(() => {
-    if (!localLoaded || hasSyncedRef.current) return;
+    if (hasSyncedRef.current) return;
 
     const thisRunId = ++syncRunIdRef.current;
     let hardTimer: any = null;
@@ -434,7 +379,7 @@ export default function CalendarScreen({ navigation }: Props) {
     })();
 
     return () => { if (hardTimer) clearTimeout(hardTimer); };
-  }, [localLoaded, currentMonth]);
+  }, [currentMonth]);
 
   // タイムアウト通知は数秒で自動で消す
   useEffect(() => {
@@ -492,15 +437,14 @@ export default function CalendarScreen({ navigation }: Props) {
   // 日別シート
   const openSheet = useCallback((dateStr: string) => {
     setSheetDate(dateStr);
-    const dbList = dbReady ? (listInstancesByDate(dateStr) ?? []) : [];
-    const merged = [ ...(localByDate[dateStr] ?? []), ...filterEventsByEntity(dbList) ];
-    setSheetItems(merged.slice(0, 50));
+    const dbList = dbReady ? filterEventsByEntity(listInstancesByDate(dateStr) ?? []) : [];
+    setSheetItems(dbList.slice(0, 50));
     setSheetVisible(true);
     requestAnimationFrame(() => {
       sheetY.stopAnimation(); sheetY.setValue(SHEET_H);
       Animated.timing(sheetY, { toValue: 0, duration: 260, useNativeDriver: true }).start();
     });
-  }, [filterEventsByEntity, sheetY, SHEET_H, localByDate, dbReady]);
+  }, [filterEventsByEntity, sheetY, SHEET_H, dbReady]);
 
   const closeSheet = useCallback(() => {
     sheetY.stopAnimation();
@@ -511,13 +455,12 @@ export default function CalendarScreen({ navigation }: Props) {
 
   const onEndReached = useCallback(() => {
     setSheetItems((prev) => {
-      const dbList = dbReady ? (listInstancesByDate(sheetDate) ?? []) : [];
-      const all = [ ...(localByDate[sheetDate] ?? []), ...filterEventsByEntity(dbList) ];
-      if (prev.length >= all.length) return prev;
-      const nextLen = Math.min(prev.length + 50, all.length);
-      return all.slice(0, nextLen);
+      const dbList = dbReady ? filterEventsByEntity(listInstancesByDate(sheetDate) ?? []) : [];
+      if (prev.length >= dbList.length) return prev;
+      const nextLen = Math.min(prev.length + 50, dbList.length);
+      return dbList.slice(0, nextLen);
     });
-  }, [sheetDate, filterEventsByEntity, localByDate, dbReady]);
+  }, [sheetDate, filterEventsByEntity, dbReady]);
 
   // CalendarList テーマ（背景画像がある時は透明化）
   const calendarTheme: any = useMemo(() => {
@@ -547,14 +490,8 @@ export default function CalendarScreen({ navigation }: Props) {
     ({ date, state, marking, onPress }: any) => {
       const dateStr = date?.dateString as string;
 
-      const dbSegsRaw = dbReady ? (eventsByDate[dateStr] ?? []) : [];
-      const dbSegs = dbSegsRaw.map((s: any) => ({ ...s, spanLeft: false, spanRight: false }));
-
-      const localSegs = (localByDate[dateStr] ?? []).map(toLocalSegment);
-
-      const merged = [ ...dbSegs, ...localSegs ] as any[];
-      const moreLocal = localSegs.length;
-      const moreDb    = dbReady ? (overflowByDate[dateStr] ?? 0) : 0;
+      const dbSegs = dbReady ? (eventsByDate[dateStr] ?? []) : [];
+      const moreDb = dbReady ? (overflowByDate[dateStr] ?? 0) : 0;
 
       return (
         <View style={{ height: cellH, overflow: 'hidden', backgroundColor: 'transparent' }}>
@@ -566,14 +503,14 @@ export default function CalendarScreen({ navigation }: Props) {
             colWBase={colWBase}
             colWLast={colWLast}
             cellH={cellH}
-            dayEvents={merged}
+            dayEvents={dbSegs}
             hideRightDivider={false}
-            moreCount={moreDb + moreLocal}
+            moreCount={moreDb}
           />
         </View>
       );
     },
-    [colWBase, colWLast, cellH, eventsByDate, overflowByDate, localByDate, dbReady]
+    [colWBase, colWLast, cellH, eventsByDate, overflowByDate, dbReady]
   );
 
   // 先読み
@@ -619,45 +556,6 @@ export default function CalendarScreen({ navigation }: Props) {
     return () => sub.remove();
   }, [currentMonth]);
 
-  const openHelp = useCallback(() => {
-    setHelpVisible(true);
-    requestAnimationFrame(() => {
-      helpSheetY.stopAnimation(); helpSheetY.setValue(HELP_SHEET_H);
-      Animated.timing(helpSheetY, { toValue: 0, duration: 260, useNativeDriver: true }).start();
-    });
-  }, [helpSheetY, HELP_SHEET_H]);
-  const closeHelp = useCallback(() => {
-    helpSheetY.stopAnimation();
-    Animated.timing(helpSheetY, { toValue: HELP_SHEET_H, duration: 220, useNativeDriver: true }).start(() => setHelpVisible(false));
-  }, [helpSheetY, HELP_SHEET_H]);
-
-  const injectTestEventsForThisMonth = useCallback(async () => {
-    const monthStart = dayjs(currentMonth + '-01');
-    const samples = [
-      { day: 3,  title: 'Test: Standup',    start: '10:00', end: '10:30' },
-      { day: 7,  title: 'Test: 1on1',       start: '14:00', end: '14:30' },
-      { day: 12, title: 'Test: Design Mtg', start: '11:00', end: '12:00' },
-      { day: 18, title: 'Test: Family',     start: '18:00', end: '19:00' },
-      { day: 25, title: 'Test: Focus',      start: '09:00', end: '11:00' },
-    ];
-    const cal = (Array.isArray(CALENDARS) ? CALENDARS : []).find(c => c?.calendar_id === formCalId);
-    const color = cal?.color ?? undefined;
-    const created: Array<{ inst: EventInstance; dStr: string }> = [];
-    for (const smp of samples) {
-      const d = monthStart.date(smp.day);
-      const startLocalISO = d.format(`YYYY-MM-DD ${smp.start}`);
-      const endLocalISO   = d.format(`YYYY-MM-DD ${smp.end}`);
-      const inst = await saveLocalEvent({ calendar_id: formCalId, title: smp.title, startLocalISO, endLocalISO, color });
-      created.push({ inst, dStr: d.format('YYYY-MM-DD') });
-    }
-    setLocalByDate(prev => { const next = { ...prev }; for (const { inst, dStr } of created) (next[dStr] ||= []).push(inst); return next; });
-    if (sheetVisible) {
-      const addedForSheet = created.filter(x => x.dStr === sheetDate).map(x => x.inst);
-      if (addedForSheet.length > 0) setSheetItems(prev => [...addedForSheet, ...prev]);
-    }
-    closeHelp();
-  }, [currentMonth, formCalId, sheetDate, sheetVisible, closeHelp]);
-
   // 背景（画像があれば透過、なければテーマの appBg）
   const bgColor = bgImageUri ? 'transparent' : theme.appBg;
   const bgScrim = bgImageUri
@@ -676,8 +574,7 @@ export default function CalendarScreen({ navigation }: Props) {
 
       {/* ステータスバッジ */}
       {!schemaReady && <StatusBadge text="Loading profile & entities…" />}
-      {schemaReady && !localLoaded && <StatusBadge text="Load events…" />}
-      {schemaReady && localLoaded && syncing && <StatusBadge text="Sync server…" />}
+      {schemaReady && syncing && <StatusBadge text="Sync server…" />}
       {syncTimedOut && <StatusBadge text="Sync timeout — local first" />}
 
       {/* カレンダー */}
@@ -809,9 +706,7 @@ export default function CalendarScreen({ navigation }: Props) {
           setFormTitle('');
           setFormStart(dayjs(selected).hour(10).minute(0).format('YYYY-MM-DD HH:mm'));
           setFormEnd(dayjs(selected).hour(11).minute(0).format('YYYY-MM-DD HH:mm'));
-          const list = Array.isArray(CALENDARS) ? CALENDARS : [];
-          const safeCalId = (list.find(c => c?.name?.includes('My: Private'))?.calendar_id ?? list[0]?.calendar_id) ?? 'CAL_LOCAL_DEFAULT';
-          setFormCalId(safeCalId);
+          setFormCalId(DEFAULT_CAL_ID);
           setAddVisible(true);
           requestAnimationFrame(() => {
             addSheetY.stopAnimation(); addSheetY.setValue(ADD_SHEET_H);
@@ -827,20 +722,6 @@ export default function CalendarScreen({ navigation }: Props) {
         }}
       >
         <Text style={{ color: theme.textPrimary, fontSize: 28, lineHeight: 28, marginTop: -2 }}>＋</Text>
-      </Pressable>
-
-      {/* 左下 ？ FAB */}
-      <Pressable
-        onPress={openHelp}
-        hitSlop={10}
-        style={{
-          position: 'absolute', left: 18, bottom: 24, width: 44, height: 44, borderRadius: 22,
-          backgroundColor: theme.surface, alignItems: 'center', justifyContent: 'center',
-          shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 6, shadowOffset: { width: 0, height: 3 },
-          elevation: 4, borderWidth: HAIR_SAFE, borderColor: theme.border,
-        }}
-      >
-        <Text style={{ color: theme.textPrimary, fontSize: 20, lineHeight: 20 }}>?</Text>
       </Pressable>
 
       {/* 追加ボトムシート（テーマ配色） */}
@@ -913,35 +794,40 @@ export default function CalendarScreen({ navigation }: Props) {
 
                 <Pressable
                   onPress={async () => {
-                    if (savingRef.current) return; savingRef.current = true; setIsSaving(true);
+                    // 二重保存ガード
+                    const saving = (CalendarScreen as any).__saving;
+                    if (saving) return;
+                    (CalendarScreen as any).__saving = true;
                     try {
                       if (!formTitle.trim()) return;
-                      const cal = (Array.isArray(CALENDARS) ? CALENDARS : []).find(c => c?.calendar_id === formCalId);
-                      const inst = await saveLocalEvent({
-                        calendar_id: formCalId, title: formTitle.trim(), startLocalISO: formStart, endLocalISO: formEnd, color: cal?.color ?? undefined,
+
+                      createEventLocal({
+                        calendar_id: formCalId,
+                        title: formTitle.trim(),
+                        start_at: formStart, // ローカルISO（toUTCは内部で処理）
+                        end_at:   formEnd,
                       });
+
                       const dStr = dayjs(formStart).format('YYYY-MM-DD');
-                      setLocalByDate(prev => {
-                        const next = { ...prev };
-                        const list = (next[dStr] ||= []);
-                        const k = dedupeKey(inst);
-                        if (!list.some(x => dedupeKey(x) === k)) list.unshift(inst);
-                        return next;
-                      });
+
+                      // 月グリッドを即再計算
+                      setRefreshKey(v => v + 1);
+
+                      // 開いている日付シートも即再取得して反映
                       if (sheetVisible && sheetDate === dStr) {
-                        const k = dedupeKey(inst);
-                        setSheetItems(prev => (prev.some(x => dedupeKey(x) === k) ? prev : [inst, ...prev]));
+                        setSheetItems((filterEventsByEntity(listInstancesByDate(dStr) ?? [])).slice(0, 50));
                       }
+
+                      // シートを閉じる
                       addSheetY.stopAnimation();
                       Animated.timing(addSheetY, { toValue: ADD_SHEET_H, duration: 220, useNativeDriver: true }).start(() => setAddVisible(false));
-                    } finally { setIsSaving(false); savingRef.current = false; }
+                    } finally {
+                      (CalendarScreen as any).__saving = false;
+                    }
                   }}
-                  disabled={isSaving}
-                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, backgroundColor: isSaving ? theme.border : theme.accent }}
+                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, backgroundColor: theme.accent }}
                 >
-                  <Text style={{ color: isSaving ? theme.textSecondary : theme.accentText, fontWeight: '800' }}>
-                    {isSaving ? 'Saving…' : 'Save'}
-                  </Text>
+                  <Text style={{ color: theme.accentText, fontWeight: '800' }}>Save</Text>
                 </Pressable>
               </View>
             </Animated.View>
