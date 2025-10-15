@@ -682,9 +682,9 @@ export default function CalendarScreen({ navigation }: Props) {
 
       {/* カレンダー */}
       <View style={[styles.gridBlock, { backgroundColor: 'transparent' }]} onLayout={(e) => setGridH(Math.round(e.nativeEvent.layout.height))}>
-        {/* absolute 罫線（lineColor は calendarStyles 側でテーマ対応済み想定） */}
+        {/* absolute 罫線（左端ラインを削除） */}
         <View style={styles.gridTopLine} />
-        <View style={styles.gridLeftLine} />
+        {/* <View style={styles.gridLeftLine} /> ← 削除 */}
 
         <View style={[styles.gridInner, { backgroundColor: 'transparent' }]} onLayout={(e) => setInnerW(e.nativeEvent.layout.width)}>
           {/* 月タイトル */}
