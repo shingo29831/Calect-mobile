@@ -1,16 +1,9 @@
 // src/screens/calendar/LeftDrawer.tsx
 import React from 'react';
-import { Animated, Platform, Pressable, Text, View } from 'react-native';
+import { Animated, Platform, Pressable, Text, View, StyleSheet } from 'react-native';
 import { DrawerRow, EntityItem } from '../CalendarParts';
 import { styles } from './calendarStyles';
-
-/** ==== Dark theme palette (local overrides) ==== */
-const OVERLAY_BG       = 'rgba(0,0,0,0.55)';
-const DRAWER_BG        = '#0f172a';   // 面
-const DRAWER_BORDER    = '#334155';   // 罫線・境界
-const TEXT_PRIMARY     = '#e2e8f0';
-const TEXT_MUTED       = '#94a3b8';
-const ACCENT_TEXT      = '#93c5fd';
+import { useAppTheme } from '../../theme';
 
 type Props = {
   open: boolean;
@@ -39,11 +32,18 @@ export default function LeftDrawer({
   GROUPS_BY_ORG,
   FOLLOWS,
 }: Props) {
+  const theme = useAppTheme();
   if (!open) return null;
+
+  // オーバーレイはライト時やや薄め、ダーク時は少し濃く
+  const overlayBg = theme.mode === 'dark' ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.35)';
+
   return (
     <View style={styles.layerWrap} pointerEvents="box-none">
-      {/* ダークなオーバーレイ */}
-      <Pressable style={[styles.layerOverlay, { backgroundColor: OVERLAY_BG }]} onPress={closeDrawer} />
+      <Pressable
+        style={[styles.layerOverlay, { backgroundColor: overlayBg }]}
+        onPress={closeDrawer}
+      />
       <Animated.View
         style={[
           styles.drawer,
@@ -51,28 +51,31 @@ export default function LeftDrawer({
             width,
             transform: [{ translateX }],
             zIndex: 10001,
-            backgroundColor: DRAWER_BG,
-            borderRightColor: DRAWER_BORDER,
-            borderRightWidth: 1,
+            backgroundColor: theme.surface,
+            borderRightColor: theme.border,
+            borderRightWidth: StyleSheet.hairlineWidth,
             ...(Platform.OS === 'android' ? { elevation: 20 } : {}),
           },
         ]}
       >
-        {/* ヘッダー */}
+        {/* Header */}
         <View
           style={[
             styles.drawerHeader,
-            { borderBottomColor: DRAWER_BORDER, borderBottomWidth: 1 },
+            { borderBottomColor: theme.border, borderBottomWidth: StyleSheet.hairlineWidth },
           ]}
         >
-          <Text style={[styles.drawerTitle, { color: TEXT_PRIMARY }]}>Select Source</Text>
-          <Text style={[styles.drawerClose, { color: ACCENT_TEXT }]} onPress={closeDrawer}>
+          <Text style={[styles.drawerTitle, { color: theme.textPrimary }]}>Select Source</Text>
+          <Text
+            style={[styles.drawerClose, { color: theme.accent }]}
+            onPress={closeDrawer}
+          >
             Close
           </Text>
         </View>
 
         {/* Organizations */}
-        <Text style={[styles.sectionHeader, { color: TEXT_MUTED }]}>Organizations</Text>
+        <Text style={[styles.sectionHeader, { color: theme.textSecondary }]}>Organizations</Text>
         {ORGS.map((org) => {
           const isExpanded = expandedOrgId === org.id;
           const groups = GROUPS_BY_ORG[org.id] ?? [];
@@ -112,7 +115,9 @@ export default function LeftDrawer({
         })}
 
         {/* Following */}
-        <Text style={[styles.sectionHeader, { color: TEXT_MUTED, marginTop: 8 }]}>Following</Text>
+        <Text style={[styles.sectionHeader, { color: theme.textSecondary, marginTop: 8 }]}>
+          Following
+        </Text>
         {FOLLOWS.map((u) => (
           <DrawerRow
             key={u.id}
