@@ -255,14 +255,21 @@ export default function CalendarScreen({ navigation }: Props) {
     Animated.timing(addSheetTranslateY, { toValue: targetY, duration: 220, useNativeDriver: true }).start();
   }, [SNAP_HEIGHTS, MAX_SHEET_H, addSheetTranslateY]);
 
-  // ===== ドラッグ（PanResponder）— シート全体で上下操作可能 =====
-  const DRAG_ACTIVATE_DY = 6; // タップ操作と共存するための閾値
+  // ===== ドラッグ（PanResponder）— ScrollView が先頭の時のみ奪取 =====
+  const DRAG_ACTIVATE_DY = 6;
+  const scrollYRef = useRef(0);
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > DRAG_ACTIVATE_DY && Math.abs(g.dy) > Math.abs(g.dx),
+      onMoveShouldSetPanResponder: (_e, g) => {
+        const atTop = scrollYRef.current <= 0 + 1; // 多少の誤差を許容
+        return atTop && Math.abs(g.dy) > DRAG_ACTIVATE_DY && Math.abs(g.dy) > Math.abs(g.dx);
+      },
       onStartShouldSetPanResponderCapture: () => false,
-      onMoveShouldSetPanResponderCapture: (_e, g) => Math.abs(g.dy) > DRAG_ACTIVATE_DY && Math.abs(g.dy) > Math.abs(g.dx),
+      onMoveShouldSetPanResponderCapture: (_e, g) => {
+        const atTop = scrollYRef.current <= 0 + 1;
+        return atTop && Math.abs(g.dy) > DRAG_ACTIVATE_DY && Math.abs(g.dy) > Math.abs(g.dx);
+      },
       onPanResponderGrant: () => {
         addSheetTranslateY.stopAnimation();
       },
@@ -764,11 +771,11 @@ export default function CalendarScreen({ navigation }: Props) {
         emoji="🙂"
       />
 
-      {/* 日別イベントシート（タップで最大化／シート外タップで閉じる／強い下ドラッグで閉じる） */}
+      {/* 日別イベントシート */}
       <DayEventsSheet
         visible={sheetVisible}
-        sheetY={sheetY}             // 互換のため渡すだけ（内部では未使用）
-        height={SHEET_MAX}          // 最大展開の高さ（80%）
+        sheetY={sheetY}
+        height={SHEET_MAX}
         date={sheetDate}
         items={sheetItems}
         onClose={closeSheet}
@@ -810,7 +817,7 @@ export default function CalendarScreen({ navigation }: Props) {
         <Text style={{ color: theme.textPrimary, fontSize: 28, lineHeight: 28, marginTop: -2 }}>＋</Text>
       </Pressable>
 
-      {/* 追加ボトムシート（タップで最大化／シート全体で上下ドラッグ／強い下ドラッグ or ほぼ最下部で閉じる） */}
+      {/* 追加ボトムシート（スクロール領域拡大 + 先頭のみドラッグ奪取） */}
       {addVisible && (
         <Pressable
           onPress={closeAddSheet}
@@ -818,7 +825,7 @@ export default function CalendarScreen({ navigation }: Props) {
         >
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
             <Animated.View
-              {...panResponder.panHandlers} // ← シート外周でもドラッグ可
+              {...panResponder.panHandlers}
               style={{
                 position: 'absolute', left: 0, right: 0, bottom: 0, height: MAX_SHEET_H,
                 backgroundColor: theme.surface, borderTopLeftRadius: 16, borderTopRightRadius: 16,
@@ -830,242 +837,226 @@ export default function CalendarScreen({ navigation }: Props) {
               <Pressable onPress={expandAddSheet} style={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 }}>
                 <View style={{ alignItems: 'center', marginBottom: 12 }}>
                   <View style={{ width: 42, height: 4, borderRadius: 2, backgroundColor: theme.border }} />
-                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 6 }}>Swipe anywhere to resize</Text>
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 6 }}>
+                    Swipe anywhere to resize
+                  </Text>
                 </View>
                 <Text style={{ fontSize: 18, fontWeight: '800', color: theme.textPrimary }}>
                   Add Event (Local JSON)
                 </Text>
               </Pressable>
 
-              {/* 本文 — ここでもドラッグ可にするため panHandlers を付与 */}
-              <ScrollView
-                {...panResponder.panHandlers}
-                keyboardShouldPersistTaps="handled"
-                contentContainerStyle={{ padding: 16, paddingTop: 8 }}
-              >
-                {/* タイトル入力 */}
-                <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Title</Text>
-                <TextInput
-                  value={formTitle}
-                  onChangeText={setFormTitle}
-                  placeholder="e.g. Meeting"
-                  placeholderTextColor={theme.textSecondary}
-                  selectionColor={theme.accent}
-                  style={{
-                    borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
-                    paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
-                    color: theme.textPrimary, backgroundColor: theme.appBg,
-                  }}
-                />
+              {/* 本文ラッパー：flex:1 + minHeight:0 でスクロール領域を最大化 */}
+              <View style={{ flex: 1, minHeight: 0 }}>
+                <ScrollView
+                  keyboardShouldPersistTaps="handled"
+                  keyboardDismissMode="on-drag"
+                  onScroll={(e) => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
+                  scrollEventThrottle={16}
+                  contentContainerStyle={{ padding: 16, paddingTop: 8, paddingBottom: 24 }}
+                  style={{ flex: 1 }}
+                >
+                  {/* タイトル入力 */}
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Title</Text>
+                  <TextInput
+                    value={formTitle}
+                    onChangeText={setFormTitle}
+                    placeholder="e.g. Meeting"
+                    placeholderTextColor={theme.textSecondary}
+                    selectionColor={theme.accent}
+                    style={{
+                      borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                      paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
+                      color: theme.textPrimary, backgroundColor: theme.appBg,
+                    }}
+                  />
 
-                {/* 説明/メモ（summary） */}
-                <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Summary / Notes</Text>
-                <TextInput
-                  value={formSummary}
-                  onChangeText={setFormSummary}
-                  placeholder="optional description"
-                  placeholderTextColor={theme.textSecondary}
-                  selectionColor={theme.accent}
-                  multiline
-                  style={{
-                    borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
-                    paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, marginBottom: 12,
-                    minHeight: 68, color: theme.textPrimary, backgroundColor: theme.appBg,
-                  }}
-                />
+                  {/* 説明/メモ（summary） */}
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Summary / Notes</Text>
+                  <TextInput
+                    value={formSummary}
+                    onChangeText={setFormSummary}
+                    placeholder="optional description"
+                    placeholderTextColor={theme.textSecondary}
+                    selectionColor={theme.accent}
+                    multiline
+                    style={{
+                      borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                      paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, marginBottom: 12,
+                      minHeight: 68, color: theme.textPrimary, backgroundColor: theme.appBg,
+                    }}
+                  />
 
-                {/* 色（#HEX）＋ 終日 */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Color (#HEX)</Text>
+                  {/* 色（#HEX）＋ 終日 */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Color (#HEX)</Text>
+                      <TextInput
+                        value={formColor}
+                        onChangeText={setFormColor}
+                        autoCapitalize="none"
+                        placeholder="#2563EB"
+                        placeholderTextColor={theme.textSecondary}
+                        selectionColor={theme.accent}
+                        style={{
+                          borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                          paddingHorizontal: 12, paddingVertical: 10, fontSize: 16,
+                          color: theme.textPrimary, backgroundColor: theme.appBg,
+                        }}
+                      />
+                    </View>
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Text style={{ color: theme.textPrimary, fontWeight: '700' }}>All day</Text>
+                      <Switch value={formAllDay} onValueChange={onToggleAllDay} />
+                    </View>
+                  </View>
+
+                  {/* ===== 日付（ポップアップ） ===== */}
+                  <View style={{ marginBottom: 12 }}>
+                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Dates</Text>
+
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      {/* 開始日 */}
+                      <Pressable
+                        onPress={() => { setStartCalOpen(true); setEndCalOpen(false); }}
+                        style={{
+                          flex: 1, borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                          paddingHorizontal: 12, paddingVertical: 10, backgroundColor: theme.appBg
+                        }}
+                      >
+                        <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 4 }}>Start</Text>
+                        <Text style={{ fontSize: 16, color: theme.textPrimary, fontWeight: '700' }}>
+                          {dayjs(startDate).format('YYYY-MM-DD')}
+                        </Text>
+                      </Pressable>
+
+                      {/* 終了日 */}
+                      <Pressable
+                        onPress={() => { setEndCalOpen(true); setStartCalOpen(false); }}
+                        style={{
+                          flex: 1, borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                          paddingHorizontal: 12, paddingVertical: 10, backgroundColor: theme.appBg
+                        }}
+                      >
+                        <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 4 }}>End</Text>
+                        <Text style={{ fontSize: 16, color: theme.textPrimary, fontWeight: '700' }}>
+                          {dayjs(endDate).format('YYYY-MM-DD')}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  {/* ===== 時刻入力（HH:mm） ===== */}
+                  {!formAllDay && (
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>
+                          Start time (HH:mm)
+                        </Text>
+                        <TextInput
+                          value={startTime}
+                          onChangeText={setStartTime}
+                          placeholder="10:00"
+                          keyboardType="numbers-and-punctuation"
+                          placeholderTextColor={theme.textSecondary}
+                          selectionColor={theme.accent}
+                          style={{
+                            borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                            paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
+                            color: theme.textPrimary, backgroundColor: theme.appBg,
+                          }}
+                        />
+                      </View>
+
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>
+                          End time (HH:mm)
+                        </Text>
+                        <TextInput
+                          value={endTime}
+                          onChangeText={setEndTime}
+                          placeholder="11:00"
+                          keyboardType="numbers-and-punctuation"
+                          placeholderTextColor={theme.textSecondary}
+                          selectionColor={theme.accent}
+                          style={{
+                            borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                            paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
+                            color: theme.textPrimary, backgroundColor: theme.appBg,
+                          }}
+                        />
+                      </View>
+                    </View>
+                  )}
+
+                  {/* ===== タグ ===== */}
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4, marginBottom: 6 }}>Tags</Text>
+
+                  {/* 既存タグセレクタ（選択済みを除く） */}
+                  {allTags.filter(t => !tags.includes(t)).length > 0 && (
+                    <View style={{ marginBottom: 8 }}>
+                      <Text style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 6 }}>Pick from existing</Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                        {allTags.filter(t => !tags.includes(t)).slice(0, 24).map(t => (
+                          <Pressable
+                            key={`opt-${t}`}
+                            onPress={() => addTag(t)}
+                            style={{
+                              paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9999,
+                              backgroundColor: theme.surface, borderWidth: HAIR_SAFE, borderColor: theme.border
+                            }}
+                          >
+                            <Text style={{ color: theme.textPrimary, fontWeight: '700' }}>#{t}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  {/* 選択中のタグ */}
+                  <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                    {tags.map((t) => (
+                      <Pressable
+                        key={`sel-${t}`}
+                        onPress={() => removeTag(t)}
+                        style={{
+                          flexDirection: 'row', alignItems: 'center', gap: 6,
+                          paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9999,
+                          backgroundColor: `${theme.accent}22`, borderWidth: HAIR_SAFE, borderColor: theme.accent
+                        }}
+                      >
+                        <Text style={{ color: theme.textPrimary, fontWeight: '700' }}>#{t}</Text>
+                        <Text style={{ color: theme.accent }}>×</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  {/* 入力 + 追加 */}
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
                     <TextInput
-                      value={formColor}
-                      onChangeText={setFormColor}
-                      autoCapitalize="none"
-                      placeholder="#2563EB"
+                      value={tagInput}
+                      onChangeText={setTagInput}
+                      onSubmitEditing={() => addTag()}
+                      placeholder="タグを入力して Enter（新規作成可）"
                       placeholderTextColor={theme.textSecondary}
                       selectionColor={theme.accent}
                       style={{
+                        flex: 1,
                         borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
                         paddingHorizontal: 12, paddingVertical: 10, fontSize: 16,
                         color: theme.textPrimary, backgroundColor: theme.appBg,
                       }}
                     />
-                  </View>
-                </View>
-
-                {/* ===== 開始日/終了日（タップでポップアップ） ===== */}
-                <View style={{ marginBottom: 12 }}>
-                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Dates</Text>
-
-                  <View style={{ flexDirection: 'row', gap: 12 }}>
-                    {/* 開始日 */}
                     <Pressable
-                      onPress={() => { setStartCalOpen(true); setEndCalOpen(false); }}
-                      style={{
-                        flex: 1, borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
-                        paddingHorizontal: 12, paddingVertical: 10, backgroundColor: theme.appBg
-                      }}
+                      onPress={() => addTag()}
+                      style={{ paddingHorizontal: 14, borderRadius: 10, backgroundColor: theme.accent, justifyContent: 'center' }}
                     >
-                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 4 }}>Start</Text>
-                      <Text style={{ fontSize: 16, color: theme.textPrimary, fontWeight: '700' }}>
-                        {dayjs(startDate).format('YYYY-MM-DD')}
-                      </Text>
-                    </Pressable>
-
-                    {/* 終了日 */}
-                    <Pressable
-                      onPress={() => { setEndCalOpen(true); setStartCalOpen(false); }}
-                      style={{
-                        flex: 1, borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
-                        paddingHorizontal: 12, paddingVertical: 10, backgroundColor: theme.appBg
-                      }}
-                    >
-                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 4 }}>End</Text>
-                      <Text style={{ fontSize: 16, color: theme.textPrimary, fontWeight: '700' }}>
-                        {dayjs(endDate).format('YYYY-MM-DD')}
-                      </Text>
+                      <Text style={{ color: theme.accentText, fontWeight: '800' }}>Add</Text>
                     </Pressable>
                   </View>
-                </View>
-
-                {/* ===== 時刻入力（HH:mm） — All day OFF の時だけ表示 ===== */}
-                
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Text style={{ color: theme.textPrimary, fontWeight: '700' }}>All day</Text>
-                  <Switch value={formAllDay} onValueChange={onToggleAllDay} />
-                </View>
-
-                
-                {!formAllDay && (
-                  <View style={{ flexDirection: 'row', gap: 12 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>
-                        Start time (HH:mm)
-                      </Text>
-                      <TextInput
-                        value={startTime}
-                        onChangeText={setStartTime}
-                        placeholder="10:00"
-                        keyboardType="numbers-and-punctuation"
-                        placeholderTextColor={theme.textSecondary}
-                        selectionColor={theme.accent}
-                        style={{
-                          borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
-                          paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
-                          color: theme.textPrimary, backgroundColor: theme.appBg,
-                        }}
-                      />
-                    </View>
-
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>
-                        End time (HH:mm)
-                      </Text>
-                      <TextInput
-                        value={endTime}
-                        onChangeText={setEndTime}
-                        placeholder="11:00"
-                        keyboardType="numbers-and-punctuation"
-                        placeholderTextColor={theme.textSecondary}
-                        selectionColor={theme.accent}
-                        style={{
-                          borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
-                          paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
-                          color: theme.textPrimary, backgroundColor: theme.appBg,
-                        }}
-                      />
-                    </View>
-                  </View>
-                )}
-
-                {/* ===== タグ ===== */}
-                <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4, marginBottom: 6 }}>Tags</Text>
-
-                {/* 既存タグセレクタ（選択済みを除く） */}
-                {allTags.filter(t => !tags.includes(t)).length > 0 && (
-                  <View style={{ marginBottom: 8 }}>
-                    <Text style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 6 }}>Pick from existing</Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                      {allTags.filter(t => !tags.includes(t)).slice(0, 24).map(t => (
-                        <Pressable
-                          key={`opt-${t}`}
-                          onPress={() => addTag(t)}
-                          style={{
-                            paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9999,
-                            backgroundColor: theme.surface, borderWidth: HAIR_SAFE, borderColor: theme.border
-                          }}
-                        >
-                          <Text style={{ color: theme.textPrimary, fontWeight: '700' }}>#{t}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </View>
-                )}
-
-                {/* 選択中のタグ */}
-                <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-                  {tags.map((t) => (
-                    <Pressable
-                      key={`sel-${t}`}
-                      onPress={() => removeTag(t)}
-                      style={{
-                        flexDirection: 'row', alignItems: 'center', gap: 6,
-                        paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9999,
-                        backgroundColor: `${theme.accent}22`, borderWidth: HAIR_SAFE, borderColor: theme.accent
-                      }}
-                    >
-                      <Text style={{ color: theme.textPrimary, fontWeight: '700' }}>#{t}</Text>
-                      <Text style={{ color: theme.accent }}>×</Text>
-                    </Pressable>
-                  ))}
-                </View>
-
-                {/* 入力 + 追加 */}
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TextInput
-                    value={tagInput}
-                    onChangeText={setTagInput}
-                    onSubmitEditing={() => addTag()}
-                    placeholder="タグを入力して Enter（新規作成可）"
-                    placeholderTextColor={theme.textSecondary}
-                    selectionColor={theme.accent}
-                    style={{
-                      flex: 1,
-                      borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
-                      paddingHorizontal: 12, paddingVertical: 10, fontSize: 16,
-                      color: theme.textPrimary, backgroundColor: theme.appBg,
-                    }}
-                  />
-                  <Pressable
-                    onPress={() => addTag()}
-                    style={{ paddingHorizontal: 14, borderRadius: 10, backgroundColor: theme.accent, justifyContent: 'center' }}
-                  >
-                    <Text style={{ color: theme.accentText, fontWeight: '800' }}>Add</Text>
-                  </Pressable>
-                </View>
-
-                {/* 似たタグ候補 */}
-                {similarTagCandidates.length > 0 && (
-                  <View style={{ marginTop: 6 }}>
-                    <Text style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 6 }}>Suggestions</Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                      {similarTagCandidates.map((t) => (
-                        <Pressable
-                          key={`sug-${t}`}
-                          onPress={() => addTag(t)}
-                          style={{
-                            paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9999,
-                            backgroundColor: theme.surface, borderWidth: HAIR_SAFE, borderColor: theme.border
-                          }}
-                        >
-                          <Text style={{ color: theme.textPrimary, fontWeight: '700' }}>#{t}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </View>
-                )}
-              </ScrollView>
+                </ScrollView>
+              </View>
 
               {/* ===== 日付ポップアップ（ミニカレンダー） ===== */}
               {(startCalOpen || endCalOpen) && (
@@ -1119,7 +1110,7 @@ export default function CalendarScreen({ navigation }: Props) {
                 </View>
               )}
 
-              {/* アクション */}
+              {/* アクション（フッター固定） */}
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12, padding: 16, paddingTop: 8 }}>
                 <Pressable
                   onPress={closeAddSheet}
