@@ -177,7 +177,11 @@ export const DayCell = React.memo(function DayCell({
   const barsTop = 6 + (DAY_FONT + 2) + 6;
   // 選択背景：accent を少し透明に
   const cellBg = isSelected ? `${theme.accent}24` /* ~0.14 */ : 'transparent';
+
+  // 画面に表示するスロット（上限内）
   const visibleSlots = dayEvents.slice(0, MAX_BARS_PER_DAY);
+  // moreCount が未指定なら自動計算
+  const computedMore = moreCount > 0 ? moreCount : Math.max(0, dayEvents.length - MAX_BARS_PER_DAY);
 
   return (
     <Pressable
@@ -267,6 +271,10 @@ export const DayCell = React.memo(function DayCell({
           const left = ev.spanLeft ? 0 : BAR_INSET;
           const right = ev.spanRight ? 0 : BAR_INSET;
 
+          // ★ ここがポイント：タイトルは常に表示（未指定時は (無題)）
+          const willShowTitle = ev.showTitle ?? true;
+          const titleText = (ev.title?.trim?.() || ev.title || '').toString().trim() || '(無題)';
+
           return (
             <View
               key={`${ev.instance_id}-${idx}`}
@@ -288,41 +296,50 @@ export const DayCell = React.memo(function DayCell({
                 justifyContent: 'center',
               }}
             >
-              {ev.showTitle ? (
+              {willShowTitle ? (
                 <Text
                   numberOfLines={1}
                   ellipsizeMode="tail"
                   style={{ fontSize: EVENT_TEXT_SIZE, color: theme.textPrimary, fontWeight: '600' }}
                 >
-                  {ev.title}
+                  {titleText}
                 </Text>
               ) : null}
             </View>
           );
         })}
 
-        {/* はみ出しがある場合の more バー */}
-        {moreCount > 0 && (
+        {/* はみ出しがある場合の more バー（+N件 と表示） */}
+        {computedMore > 0 && (
           <View
             style={{
               position: 'absolute',
               left: BAR_INSET,
               right: BAR_INSET,
-              top: MAX_BARS_PER_DAY * (EVENT_BAR_H + EVENT_BAR_GAP),
+              top: visibleSlots.length * (EVENT_BAR_H + EVENT_BAR_GAP),
               height: EVENT_BAR_H,
               borderRadius: EVENT_BAR_RADIUS,
               backgroundColor: theme.border,
               borderWidth: StyleSheet.hairlineWidth,
               borderColor: theme.textSecondary,
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
-          />
+          >
+            <Text
+              numberOfLines={1}
+              style={{ fontSize: EVENT_TEXT_SIZE, color: theme.textSecondary, fontWeight: '600' }}
+            >
+              +{computedMore}件
+            </Text>
+          </View>
         )}
       </View>
     </Pressable>
   );
 });
 
-/* ===== リスト用行など（テーマ対応） ===== */
+/* ===== リスト用行など（テーマ対応）===== */
 export function DrawerRow({
   item,
   active,

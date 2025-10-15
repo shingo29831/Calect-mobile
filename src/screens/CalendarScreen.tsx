@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useDeferredVa
 import { View, Text, Pressable, Platform, TextInput, KeyboardAvoidingView, Animated, Image, StyleSheet } from 'react-native';
 import type { AppStateStatus } from 'react-native';
 import { CalendarList } from 'react-native-calendars';
+import { Calendar as MiniCalendar } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
 import dayjs from '../lib/dayjs';
 import { listInstancesByDate, createEventLocal } from '../store/db';
@@ -236,10 +237,16 @@ export default function CalendarScreen({ navigation }: Props) {
   const ADD_SHEET_H = Math.floor(SCREEN_H * 0.65);
   const addSheetY = useRef(new Animated.Value(ADD_SHEET_H)).current;
 
-  // 追加フォーム
+  // 追加フォーム（開始日/終了日＋時刻）
   const [formTitle, setFormTitle] = useState('');
-  const [formStart, setFormStart] = useState<string>(dayjs().format('YYYY-MM-DD HH:mm'));
-  const [formEnd, setFormEnd] = useState<string>(dayjs().add(1, 'hour').format('YYYY-MM-DD HH:mm'));
+  const [startDate, setStartDate] = useState<string>(dayjs().format('YYYY-MM-DD'));
+  const [endDate, setEndDate]     = useState<string>(dayjs().format('YYYY-MM-DD'));
+  const [startTime, setStartTime] = useState<string>('10:00');
+  const [endTime, setEndTime]     = useState<string>('11:00');
+
+  // ポップアップ（どちらのカレンダーを開くか）
+  const [startCalOpen, setStartCalOpen] = useState(false);
+  const [endCalOpen, setEndCalOpen]     = useState(false);
 
   // seeds.ts を削除したため、デフォルトのカレンダーIDのみ使用
   const DEFAULT_CAL_ID = 'CAL_LOCAL_DEFAULT';
@@ -579,7 +586,7 @@ export default function CalendarScreen({ navigation }: Props) {
 
       {/* カレンダー */}
       <View style={[styles.gridBlock, { backgroundColor: 'transparent' }]} onLayout={(e) => setGridH(Math.round(e.nativeEvent.layout.height))}>
-        {/* absolute 罫線（lineColor は calendarStyles 側でテーマ対応済み想定） */}
+        {/* absolute 罫線 */}
         <View style={styles.gridTopLine} />
         <View style={styles.gridLeftLine} />
 
@@ -704,8 +711,10 @@ export default function CalendarScreen({ navigation }: Props) {
       <Pressable
         onPress={() => {
           setFormTitle('');
-          setFormStart(dayjs(selected).hour(10).minute(0).format('YYYY-MM-DD HH:mm'));
-          setFormEnd(dayjs(selected).hour(11).minute(0).format('YYYY-MM-DD HH:mm'));
+          setStartDate(selected);
+          setEndDate(selected);
+          setStartTime('10:00');
+          setEndTime('11:00');
           setFormCalId(DEFAULT_CAL_ID);
           setAddVisible(true);
           requestAnimationFrame(() => {
@@ -742,6 +751,7 @@ export default function CalendarScreen({ navigation }: Props) {
               <View style={{ width: 42, height: 4, borderRadius: 2, backgroundColor: theme.border, alignSelf: 'center', marginBottom: 12 }} />
               <Text style={{ fontSize: 18, fontWeight: '800', marginBottom: 12, color: theme.textPrimary }}>Add Event (Local JSON)</Text>
 
+              {/* タイトル */}
               <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Title</Text>
               <TextInput
                 value={formTitle}
@@ -756,33 +766,141 @@ export default function CalendarScreen({ navigation }: Props) {
                 }}
               />
 
-              <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Start (YYYY-MM-DD HH:mm)</Text>
-              <TextInput
-                value={formStart}
-                onChangeText={setFormStart}
-                placeholder="2025-10-06 10:00"
-                placeholderTextColor={theme.textSecondary}
-                selectionColor={theme.accent}
-                style={{
-                  borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
-                  paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
-                  color: theme.textPrimary, backgroundColor: theme.appBg,
-                }}
-              />
+              {/* ===== 開始日/終了日（タップでポップアップ） ===== */}
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Dates</Text>
 
-              <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>End (YYYY-MM-DD HH:mm)</Text>
-              <TextInput
-                value={formEnd}
-                onChangeText={setFormEnd}
-                placeholder="2025-10-06 11:00"
-                placeholderTextColor={theme.textSecondary}
-                selectionColor={theme.accent}
-                style={{
-                  borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
-                  paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
-                  color: theme.textPrimary, backgroundColor: theme.appBg,
-                }}
-              />
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  {/* 開始日 */}
+                  <Pressable
+                    onPress={() => { setStartCalOpen(true); setEndCalOpen(false); }}
+                    style={{
+                      flex: 1, borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                      paddingHorizontal: 12, paddingVertical: 10, backgroundColor: theme.appBg
+                    }}
+                  >
+                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 4 }}>Start</Text>
+                    <Text style={{ fontSize: 16, color: theme.textPrimary, fontWeight: '700' }}>
+                      {dayjs(startDate).format('YYYY-MM-DD')}
+                    </Text>
+                  </Pressable>
+
+                  {/* 終了日 */}
+                  <Pressable
+                    onPress={() => { setEndCalOpen(true); setStartCalOpen(false); }}
+                    style={{
+                      flex: 1, borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                      paddingHorizontal: 12, paddingVertical: 10, backgroundColor: theme.appBg
+                    }}
+                  >
+                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 4 }}>End</Text>
+                    <Text style={{ fontSize: 16, color: theme.textPrimary, fontWeight: '700' }}>
+                      {dayjs(endDate).format('YYYY-MM-DD')}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* ===== 時刻入力（HH:mm） ===== */}
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>
+                    Start time (HH:mm)
+                  </Text>
+                  <TextInput
+                    value={startTime}
+                    onChangeText={setStartTime}
+                    placeholder="10:00"
+                    keyboardType="numbers-and-punctuation"
+                    placeholderTextColor={theme.textSecondary}
+                    selectionColor={theme.accent}
+                    style={{
+                      borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                      paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
+                      color: theme.textPrimary, backgroundColor: theme.appBg,
+                    }}
+                  />
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>
+                    End time (HH:mm)
+                  </Text>
+                  <TextInput
+                    value={endTime}
+                    onChangeText={setEndTime}
+                    placeholder="11:00"
+                    keyboardType="numbers-and-punctuation"
+                    placeholderTextColor={theme.textSecondary}
+                    selectionColor={theme.accent}
+                    style={{
+                      borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                      paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
+                      color: theme.textPrimary, backgroundColor: theme.appBg,
+                    }}
+                  />
+                </View>
+              </View>
+
+              {/* ===== 日付ポップアップ（ミニカレンダー） ===== */}
+              {(startCalOpen || endCalOpen) && (
+                <View style={{
+                  position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
+                  alignItems: 'center', justifyContent: 'center', zIndex: 20
+                }}>
+                  {/* 背景タップで閉じる */}
+                  <Pressable
+                    onPress={() => { setStartCalOpen(false); setEndCalOpen(false); }}
+                    style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.25)' }}
+                  />
+                  <View style={{
+                    width: Math.min(SCREEN_W - 32, 360),
+                    borderRadius: 12, borderWidth: HAIR_SAFE, borderColor: theme.border,
+                    backgroundColor: theme.surface, overflow: 'hidden'
+                  }}>
+                    <MiniCalendar
+                      firstDay={FIRST_DAY}
+                      initialDate={startCalOpen ? startDate : endDate}
+                      markedDates={{ [startCalOpen ? startDate : endDate]: { selected: true } }}
+                      hideExtraDays={false}
+                      enableSwipeMonths
+                      theme={{
+                        backgroundColor: theme.surface,
+                        calendarBackground: theme.surface,
+                        dayTextColor: theme.textPrimary,
+                        textDisabledColor: theme.dayDisabled,
+                        monthTextColor: theme.textPrimary,
+                        todayTextColor: theme.accent,
+                        selectedDayTextColor: theme.accentText,
+                        selectedDayBackgroundColor: theme.accent,
+                        arrowColor: theme.textPrimary,
+                        textDayFontWeight: '700',
+                        textMonthFontWeight: '800',
+                      }}
+                      onDayPress={(d: DateData) => {
+                        const nd = d.dateString;
+
+                        if (startCalOpen) {
+                          // 開始日を更新。終了日が前なら自動で揃える
+                          setStartDate(nd);
+                          if (dayjs(endDate).isBefore(dayjs(nd))) {
+                            setEndDate(nd);
+                          }
+                          setStartCalOpen(false);
+                        } else {
+                          // 終了日を更新。開始日より前なら開始日に揃える
+                          if (dayjs(nd).isBefore(dayjs(startDate))) {
+                            setEndDate(startDate);
+                          } else {
+                            setEndDate(nd);
+                          }
+                          setEndCalOpen(false);
+                        }
+                      }}
+                    />
+                  </View>
+                </View>
+              )}
 
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
                 <Pressable
@@ -801,14 +919,37 @@ export default function CalendarScreen({ navigation }: Props) {
                     try {
                       if (!formTitle.trim()) return;
 
+                      // 入力正規化（9:0 → 09:00）
+                      const norm = (t: string) => {
+                        const m = String(t || '').match(/^(\d{1,2}):(\d{1,2})$/);
+                        if (!m) return null;
+                        const hh = String(Math.max(0, Math.min(23, Number(m[1])))).padStart(2, '0');
+                        const mm = String(Math.max(0, Math.min(59, Number(m[2])))).padStart(2, '0');
+                        return `${hh}:${mm}`;
+                      };
+                      const st = norm(startTime);
+                      const et = norm(endTime);
+                      if (!st || !et) return;
+
+                      // 念のため保存直前にも「終了日 < 開始日」を補正
+                      let sDate = startDate;
+                      let eDate = endDate;
+                      if (dayjs(eDate).isBefore(dayjs(sDate))) eDate = sDate;
+
+                      const startIso = dayjs(`${sDate} ${st}`).format('YYYY-MM-DD HH:mm');
+                      const endIso   = dayjs(`${eDate} ${et}`).format('YYYY-MM-DD HH:mm');
+
+                      // 完全な前後反転（日時）も弾く（同一日時もNGにする場合は >= に変更）
+                      if (!dayjs(endIso).isAfter(dayjs(startIso))) return;
+
                       createEventLocal({
                         calendar_id: formCalId,
                         title: formTitle.trim(),
-                        start_at: formStart, // ローカルISO（toUTCは内部で処理）
-                        end_at:   formEnd,
+                        start_at: startIso, // ローカルISO（toUTCは内部で処理）
+                        end_at:   endIso,
                       });
 
-                      const dStr = dayjs(formStart).format('YYYY-MM-DD');
+                      const dStr = dayjs(startIso).format('YYYY-MM-DD');
 
                       // 月グリッドを即再計算
                       setRefreshKey(v => v + 1);
