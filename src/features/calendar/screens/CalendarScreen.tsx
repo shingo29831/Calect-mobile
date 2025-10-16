@@ -1,4 +1,4 @@
-﻿// src/screens/CalendarScreen.tsx
+﻿// src/features/calendar/screens/CalendarScreen.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue, memo } from 'react';
 import {
   View, Text, Pressable, Platform, TextInput, KeyboardAvoidingView, Animated,
@@ -39,7 +39,7 @@ import { useAppTheme } from '../../../theme';
 type Props = NativeStackScreenProps<RootStackParamList, 'Calendar'>;
 type SortMode = 'span' | 'start';
 
-// ===== サーバーデータ & クライアント設定 =====
+/* --------- 型とダイヤルコンポーネント（省略不可なのでこのまま） --------- */
 type ServerDocV2 = {
   version: number;
   profile?: { current_user_id?: string; default_tz?: string; locale?: string; profile_image_path?: string | null;
@@ -78,16 +78,14 @@ async function loadAppData(): Promise<{ server?: ServerDocV2; prefs?: ClientPref
 }
 
 /** ==================
- *  HourDial: 二重リング (内側 0-11, 外側 12-23)
- *  - 角度は中央を基準に「上=0°、時計回り」
- *  - 押下/ドラッグ中に onChange、離したとき onConfirm
+ *  HourDial
  *  ================== */
 type HourDialProps = {
   size?: number;
-  innerRatio?: number;     // 内側リングの半径比 (外径に対して)
-  outerRatio?: number;     // 外側リングの半径比 (外径に対して)
-  thresholdRatio?: number; // 内外判定の閾値 (半径比)
-  value?: number | null;   // 0-23
+  innerRatio?: number;
+  outerRatio?: number;
+  thresholdRatio?: number;
+  value?: number | null;
   onChange: (hour: number) => void;
   onConfirm: (hour: number) => void;
   selectedColor?: string;
@@ -105,24 +103,22 @@ const HourDial: React.FC<HourDialProps> = memo(({
   textColor = '#111',
 }) => {
   const radius = size / 2;
-  const itemsInner = Array.from({ length: 12 }, (_, h) => h);       // 0..11
-  const itemsOuter = Array.from({ length: 12 }, (_, i) => i + 12);  // 12..23
+  const itemsInner = Array.from({ length: 12 }, (_, h) => h);
+  const itemsOuter = Array.from({ length: 12 }, (_, i) => i + 12);
 
   const pickFromXY = useCallback((x: number, y: number) => {
     const dx = x - radius;
     const dy = y - radius;
 
-    let ang = Math.atan2(dy, dx); // -pi..pi (右=0°、上= -90°)
-    ang = ang + Math.PI / 2;      // 上を 0° に
-    if (ang < 0) ang += Math.PI * 2; // 0..2pi
-    const deg = (ang * 180) / Math.PI; // 0..360
+    let ang = Math.atan2(dy, dx);
+    ang = ang + Math.PI / 2;
+    if (ang < 0) ang += Math.PI * 2;
+    const deg = (ang * 180) / Math.PI;
 
-    // 半径比で内外を判定
     const r = Math.sqrt(dx * dx + dy * dy);
     const ratio = r / radius;
     const isOuter = ratio >= thresholdRatio;
 
-    // 0°=上を 12分割
     const index = Math.round((deg / 360) * 12) % 12;
     const hour = isOuter ? (12 + index) % 24 : index;
     return hour;
@@ -143,7 +139,7 @@ const HourDial: React.FC<HourDialProps> = memo(({
   const ring = (items: number[], ringRatio: number) => (
     <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} pointerEvents="none">
       {items.map((h) => {
-        const idx = h % 12; // 0..11
+        const idx = h % 12;
         const angle = ((idx / 12) * 360 - 90) * (Math.PI / 180);
         const r = radius * ringRatio;
         const x = radius + r * Math.cos(angle);
@@ -190,7 +186,6 @@ const HourDial: React.FC<HourDialProps> = memo(({
       {ring(itemsOuter, outerRatio)}
       {ring(itemsInner, innerRatio)}
 
-      {/* 中央表示 */}
       <View
         style={{
           width: radius * 0.9,
@@ -208,14 +203,12 @@ const HourDial: React.FC<HourDialProps> = memo(({
 });
 
 /** ==================
- *  MinuteDial: 0-59 の単一リング
- *  - 角度は中央基準（上=0°、時計回り）
- *  - 主要ラベルは 5分刻みで表示
+ *  MinuteDial
  *  ================== */
 type MinuteDialProps = {
   size?: number;
   ringRatio?: number;
-  value?: number | null; // 0..59
+  value?: number | null;
   onChange: (min: number) => void;
   onConfirm: (min: number) => void;
   selectedColor?: string;
@@ -320,7 +313,7 @@ const MinuteDial: React.FC<MinuteDialProps> = memo(({
   );
 });
 
-// ===== フォールバック定数（絵文字の文字化けを修正）=====
+// ===== フォールバック定数 =====
 const ORGS_FALLBACK: EntityItem[] = [
   { id: 'org_me',   label: 'My Schedule', emoji: '🗓️', kind: 'me' },
   { id: 'org_fam',  label: 'Family',      emoji: '👨‍👩‍👧‍👦', kind: 'org' },
@@ -464,7 +457,7 @@ export default function CalendarScreen({ navigation }: Props) {
   const [sheetItems, setSheetItems] = useState<any[]>([]);
   const sheetY = useRef(new Animated.Value(0)).current;
 
-  // 追加シート
+  // 追加シート（イベント作成）
   const [addVisible, setAddVisible] = useState(false);
   const MAX_SHEET_H = Math.floor(SCREEN_H * 0.9);
   const SNAP_HEIGHTS = [
@@ -608,20 +601,16 @@ export default function CalendarScreen({ navigation }: Props) {
   }, []);
 
   const ensureEndTimeNotBeforeStart = useCallback((s: string, e: string) => {
-    // All day の時はスキップ（00:00〜23:59で自然と前後関係OK）
     if (formAllDay) return;
     const sm = parseHM(s);
     const em = parseHM(e);
     if (sm != null && em != null && em < sm) {
       setEndTime(s);
-      const mm = String(sm % 60).padStart(2, '0');
-      const hh = String(Math.floor(sm / 60)).padStart(2, '0');
       setEndHour(Math.floor(sm / 60));
       setEndMinute(sm % 60);
     }
   }, [formAllDay, parseHM]);
 
-  // 変更のたびに整合性を担保（安全網）
   useEffect(() => {
     ensureEndDateNotBeforeStart(startDate, endDate);
   }, [startDate, endDate, ensureEndDateNotBeforeStart]);
@@ -691,7 +680,7 @@ export default function CalendarScreen({ navigation }: Props) {
   const enabledMonthDates = dbReady ? monthDates : [];
   const { eventsByDate, overflowByDate } = useMonthEvents(enabledMonthDates, filterEventsByEntity, sortMode, refreshKey);
 
-  // 初回同期（タイムアウトしてもローカル優先で可視化）
+  // 初回同期
   useEffect(() => {
     if (hasSyncedRef.current) return;
 
@@ -823,7 +812,7 @@ export default function CalendarScreen({ navigation }: Props) {
         container: { paddingLeft: 0, paddingRight: 0, paddingTop: 0, backgroundColor: 'transparent' },
         monthView: { paddingHorizontal: 0, paddingTop: 0, marginTop: 0, backgroundColor: 'transparent' },
         week: { marginTop: 0, marginBottom: 0, padding: 0, flexDirection: 'row', justifyContent: 'flex-start', alignItems: 'stretch', backgroundColor: 'transparent' },
-        dayContainer: { flex: 0, padding: 0, margin: 0, alignItems: 'flex-start', justifyContent: 'flex-start', width: undefined, backgroundColor: 'transparent' },
+        dayContainer: { flex: 0, padding: 0, margin: 0, alignItems: 'stretch', justifyContent: 'flex-start', width: undefined, backgroundColor: 'transparent' },
       },
       'stylesheet.day.basic': { base: { flex: 0, width: undefined, margin: 0, padding: 0, alignItems: 'stretch', justifyContent: 'flex-start', backgroundColor: 'transparent' } },
       'stylesheet.calendar-list.main': { calendar: { paddingLeft: 0, paddingRight: 0, paddingTop: 0, marginTop: 0, backgroundColor: 'transparent' } },
@@ -930,7 +919,6 @@ export default function CalendarScreen({ navigation }: Props) {
     if (v) { setStartTime('00:00'); setEndTime('23:59'); }
   }, []);
 
-  // 時間→文字列適用
   const applyHourToStartTime = useCallback((h: number) => {
     const hh = String(Math.max(0, Math.min(23, h))).padStart(2, '0');
     setStartTime(`${hh}:${String(startMinute ?? 0).padStart(2,'0')}`);
@@ -939,9 +927,72 @@ export default function CalendarScreen({ navigation }: Props) {
     const hh = String(Math.max(0, Math.min(23, h))).padStart(2, '0');
     const next = `${hh}:${String(endMinute ?? 0).padStart(2,'0')}`;
     setEndTime(next);
-    // 時を確定した直後に整合性を担保（終了<開始→終了=開始）
     ensureEndTimeNotBeforeStart(startTime, next);
   }, [endMinute, startTime, ensureEndTimeNotBeforeStart]);
+
+  // ===== 保存ロジック（共通化） =====
+  const saveEvent = useCallback(async () => {
+    const saving = (CalendarScreen as any).__saving;
+    if (saving) return;
+    (CalendarScreen as any).__saving = true;
+    try {
+      if (!formTitle.trim()) return;
+
+      const norm = (t: string) => {
+        const m = String(t || '').match(/^(\d{1,2}):(\d{1,2})$/);
+        if (!m) return null;
+        const hh = String(Math.max(0, Math.min(23, Number(m[1])))).padStart(2, '0');
+        const mm = String(Math.max(0, Math.min(59, Number(m[2])))).padStart(2, '0');
+        return `${hh}:${mm}`;
+      };
+
+      const st = formAllDay ? '00:00' : norm(startTime);
+      const et = formAllDay ? '23:59' : norm(endTime);
+      if (!st || !et) return;
+
+      let sDate = startDate;
+      let eDate = endDate;
+      if (dayjs(eDate).isBefore(dayjs(sDate))) eDate = sDate;
+
+      const sm = parseHM(st) ?? 0;
+      const em = parseHM(et) ?? 0;
+      const endFixed = em < sm ? st : et;
+
+      const startIso = dayjs(`${sDate} ${st}`).format('YYYY-MM-DD HH:mm');
+      const endIso   = dayjs(`${eDate} ${endFixed}`).format('YYYY-MM-DD HH:mm');
+
+      if (!dayjs(endIso).isAfter(dayjs(startIso))) return;
+
+      const color = (formColor || '').trim();
+      const validColor = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(color) ? color : undefined;
+
+      await createEventLocal({
+        calendar_id: formCalId,
+        title: formTitle.trim(),
+        summary: formSummary.trim(),
+        color: validColor,
+        style: tags.length ? { tags } : undefined,
+        start_at: startIso,
+        end_at:   endIso,
+      });
+
+      if (tags.length) setAllTags(getAllTags());
+
+      const dStr = dayjs(startIso).format('YYYY-MM-DD');
+      setRefreshKey(v => v + 1);
+      if (sheetVisible && sheetDate === dStr) {
+        setSheetItems((filterEventsByEntity(listInstancesByDate(dStr) ?? [])).slice(0, 50));
+      }
+
+      closeAddSheet();
+    } finally {
+      (CalendarScreen as any).__saving = false;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    formTitle, formSummary, formAllDay, startTime, endTime, startDate, endDate,
+    formColor, formCalId, tags, sheetVisible, sheetDate, filterEventsByEntity
+  ]);
 
   return (
     <View style={[styles.container, { backgroundColor: bgColor }]}>
@@ -1077,7 +1128,7 @@ export default function CalendarScreen({ navigation }: Props) {
         rowHeight={64}
       />
 
-      {/* FAB */}
+      {/* 右下の FAB（シートを開くだけ） */}
       <Pressable
         onPress={() => {
           setFormTitle('');
@@ -1110,30 +1161,21 @@ export default function CalendarScreen({ navigation }: Props) {
           shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 4 },
           elevation: 6, borderWidth: HAIR_SAFE, borderColor: theme.border,
         }}
+        accessibilityLabel="イベント作成シートを開く"
       >
         <Text style={{ color: theme.textPrimary, fontSize: 28, lineHeight: 28, marginTop: -2 }}>＋</Text>
       </Pressable>
 
       {/* 追加フォーム（オーバーレイ） */}
       {addVisible && (
-        <View
-          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
-          pointerEvents="box-none"
-        >
+        <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} pointerEvents="box-none">
           {/* 背景タップで閉じる */}
-          <Pressable
-            onPress={closeAddSheet}
-            style={StyleSheet.absoluteFillObject}
-          >
+          <Pressable onPress={closeAddSheet} style={StyleSheet.absoluteFillObject}>
             <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }} />
           </Pressable>
 
           {/* 下からのシート */}
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={{ flex: 1 }}
-            pointerEvents="box-none"
-          >
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }} pointerEvents="box-none">
             <Animated.View
               {...panResponder.panHandlers}
               style={{
@@ -1143,35 +1185,55 @@ export default function CalendarScreen({ navigation }: Props) {
                 transform: [{ translateY: addSheetTranslateY }],
               }}
             >
-              {/* ハンドル */}
-              <Pressable onPress={expandAddSheet} style={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 }}>
-                <View style={{ alignItems: 'center', marginBottom: 12 }}>
+              {/* --- ツールバー（右上：決定） --- */}
+              <View
+                style={{
+                  flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                  paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6, borderBottomWidth: HAIR_SAFE, borderColor: theme.border,
+                }}
+              >
+
+                {/* タイトル（中央寄せ） */}
+                <Text style={{ fontSize: 16, fontWeight: '800', color: theme.textPrimary }}>
+                  イベントを追加
+                </Text>
+
+                {/* 右上：決定（保存） */}
+                <Pressable
+                  onPress={saveEvent}
+                  style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: theme.accent, minWidth: 96, alignItems: 'center' }}
+                  accessibilityLabel="決定"
+                >
+                  <Text style={{ color: theme.accentText, fontWeight: '800' }}>決定</Text>
+                </Pressable>
+              </View>
+
+              {/* ハンドル & ヒント */}
+              <Pressable onPress={expandAddSheet} style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 }}>
+                <View style={{ alignItems: 'center', marginBottom: 10 }}>
                   <View style={{ width: 42, height: 4, borderRadius: 2, backgroundColor: theme.border }} />
                   <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 6 }}>
-                    Swipe anywhere to resize
+                    上へドラッグで拡大
                   </Text>
                 </View>
-                <Text style={{ fontSize: 18, fontWeight: '800', color: theme.textPrimary }}>
-                  Add Event (Local JSON)
-                </Text>
               </Pressable>
 
-              {/* フォーム本体 */}
+              {/* フォーム本体（下部に固定ボタンがあるため余白を追加） */}
               <View style={{ flex: 1, minHeight: 0 }}>
                 <ScrollView
                   keyboardShouldPersistTaps="handled"
                   keyboardDismissMode="on-drag"
                   onScroll={(e) => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
                   scrollEventThrottle={16}
-                  contentContainerStyle={{ padding: 16, paddingTop: 8, paddingBottom: 24 }}
+                  contentContainerStyle={{ padding: 16, paddingTop: 0, paddingBottom: 110 }}
                   style={{ flex: 1 }}
                 >
                   {/* タイトル */}
-                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Title</Text>
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>タイトル(必須)</Text>
                   <TextInput
                     value={formTitle}
                     onChangeText={setFormTitle}
-                    placeholder="e.g. Meeting"
+                    placeholder="例: 打ち合わせ"
                     placeholderTextColor={theme.textSecondary}
                     selectionColor={theme.accent}
                     style={{
@@ -1182,11 +1244,11 @@ export default function CalendarScreen({ navigation }: Props) {
                   />
 
                   {/* サマリ */}
-                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Summary / Notes</Text>
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>メモ / 説明</Text>
                   <TextInput
                     value={formSummary}
                     onChangeText={setFormSummary}
-                    placeholder="optional description"
+                    placeholder="任意で入力"
                     placeholderTextColor={theme.textSecondary}
                     selectionColor={theme.accent}
                     multiline
@@ -1197,11 +1259,9 @@ export default function CalendarScreen({ navigation }: Props) {
                     }}
                   />
 
-                  
-
                   {/* 日付 */}
                   <View style={{ marginBottom: 12 }}>
-                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Dates</Text>
+                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>日付</Text>
 
                     <View style={{ flexDirection: 'row', gap: 12 }}>
                       {/* 開始日 */}
@@ -1212,7 +1272,7 @@ export default function CalendarScreen({ navigation }: Props) {
                           paddingHorizontal: 12, paddingVertical: 10, backgroundColor: theme.appBg
                         }}
                       >
-                        <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 4 }}>Start</Text>
+                        <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 4 }}>開始</Text>
                         <Text style={{ fontSize: 16, color: theme.textPrimary, fontWeight: '700' }}>
                           {dayjs(startDate).format('YYYY-MM-DD')}
                         </Text>
@@ -1226,7 +1286,7 @@ export default function CalendarScreen({ navigation }: Props) {
                           paddingHorizontal: 12, paddingVertical: 10, backgroundColor: theme.appBg
                         }}
                       >
-                        <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 4 }}>End</Text>
+                        <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 4 }}>終了</Text>
                         <Text style={{ fontSize: 16, color: theme.textPrimary, fontWeight: '700' }}>
                           {dayjs(endDate).format('YYYY-MM-DD')}
                         </Text>
@@ -1236,12 +1296,12 @@ export default function CalendarScreen({ navigation }: Props) {
 
                   {/* 時刻 */}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Text style={{ color: theme.textPrimary, fontWeight: '700' }}>All day</Text>
+                    <Text style={{ color: theme.textPrimary, fontWeight: '700' }}>終日</Text>
                     <Switch value={formAllDay} onValueChange={onToggleAllDay} />
                   </View>
                   {!formAllDay && (
                     <View style={{ flexDirection: 'row', gap: 12 }}>
-                      {/* 開始時刻（タップで時計オーバーレイ） */}
+                      {/* 開始時刻 */}
                       <Pressable
                         onPress={() => {
                           setStartTimeOpen(true);
@@ -1257,12 +1317,12 @@ export default function CalendarScreen({ navigation }: Props) {
                         }}
                       >
                         <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>
-                          Start time (tap to select)
+                          開始時刻（タップで選択）
                         </Text>
                         <Text style={{ fontSize: 16, color: theme.textPrimary, fontWeight: '700' }}>{startTime}</Text>
                       </Pressable>
 
-                      {/* 終了時刻（タップで時計オーバーレイ） */}
+                      {/* 終了時刻 */}
                       <Pressable
                         onPress={() => {
                           setEndTimeOpen(true);
@@ -1278,7 +1338,7 @@ export default function CalendarScreen({ navigation }: Props) {
                         }}
                       >
                         <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>
-                          End time (tap to select)
+                          終了時刻（タップで選択）
                         </Text>
                         <Text style={{ fontSize: 16, color: theme.textPrimary, fontWeight: '700' }}>{endTime}</Text>
                       </Pressable>
@@ -1286,11 +1346,11 @@ export default function CalendarScreen({ navigation }: Props) {
                   )}
 
                   {/* タグ */}
-                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4, marginBottom: 6 }}>Tags</Text>
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4, marginBottom: 6 }}>タグ</Text>
 
                   {allTags.filter(t => !tags.includes(t)).length > 0 && (
                     <View style={{ marginBottom: 8 }}>
-                      <Text style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 6 }}>Pick from existing</Text>
+                      <Text style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 6 }}>既存から選択</Text>
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                         {allTags.filter(t => !tags.includes(t)).slice(0, 24).map(t => (
                           <Pressable
@@ -1332,7 +1392,7 @@ export default function CalendarScreen({ navigation }: Props) {
                       value={tagInput}
                       onChangeText={setTagInput}
                       onSubmitEditing={() => addTag()}
-                      placeholder="Type a tag and press Enter"
+                      placeholder="タグを入力してEnter"
                       placeholderTextColor={theme.textSecondary}
                       selectionColor={theme.accent}
                       style={{
@@ -1346,15 +1406,14 @@ export default function CalendarScreen({ navigation }: Props) {
                       onPress={() => addTag()}
                       style={{ paddingHorizontal: 14, borderRadius: 10, backgroundColor: theme.accent, justifyContent: 'center' }}
                     >
-                      <Text style={{ color: theme.accentText, fontWeight: '800' }}>Add</Text>
+                      <Text style={{ color: theme.accentText, fontWeight: '800' }}>追加</Text>
                     </Pressable>
                   </View>
 
-
                   {/* 色 */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12, marginTop: 12 }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Color (#HEX)</Text>
+                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>色 (#HEX)</Text>
                       <TextInput
                         value={formColor}
                         onChangeText={setFormColor}
@@ -1373,84 +1432,19 @@ export default function CalendarScreen({ navigation }: Props) {
                 </ScrollView>
               </View>
 
-              {/* アクション行 */}
-              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12, padding: 16, paddingTop: 8 }}>
+              {/* === 下部固定：キャンセル === */}
+              <View style={{
+                position:'absolute', left:0, right:0, bottom:0,
+                paddingHorizontal:16, paddingVertical:12,
+                borderTopWidth: HAIR_SAFE, borderColor: theme.border, backgroundColor: theme.surface
+              }}>
                 <Pressable
                   onPress={closeAddSheet}
-                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, backgroundColor: theme.border }}
+                  style={{ height:48, borderRadius:12, alignItems:'center', justifyContent:'center',
+                    borderWidth: HAIR_SAFE, borderColor: theme.border, backgroundColor: theme.appBg }}
+                  accessibilityLabel="キャンセル"
                 >
-                  <Text style={{ fontWeight: '700', color: theme.textPrimary }}>Cancel</Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={async () => {
-                    const saving = (CalendarScreen as any).__saving;
-                    if (saving) return;
-                    (CalendarScreen as any).__saving = true;
-                    try {
-                      if (!formTitle.trim()) return;
-
-                      // 時刻正規化
-                      const norm = (t: string) => {
-                        const m = String(t || '').match(/^(\d{1,2}):(\d{1,2})$/);
-                        if (!m) return null;
-                        const hh = String(Math.max(0, Math.min(23, Number(m[1])))).padStart(2, '0');
-                        const mm = String(Math.max(0, Math.min(59, Number(m[2])))).padStart(2, '0');
-                        return `${hh}:${mm}`;
-                      };
-
-                      // All day は 00:00〜23:59
-                      const st = formAllDay ? '00:00' : norm(startTime);
-                      const et = formAllDay ? '23:59' : norm(endTime);
-                      if (!st || !et) return;
-
-                      // 開始/終了日（終了 < 開始 を即補正）
-                      let sDate = startDate;
-                      let eDate = endDate;
-                      if (dayjs(eDate).isBefore(dayjs(sDate))) eDate = sDate;
-
-                      // 終了時刻 < 開始時刻 を即補正
-                      const sm = parseHM(st) ?? 0;
-                      const em = parseHM(et) ?? 0;
-                      const endFixed = em < sm ? st : et;
-
-                      const startIso = dayjs(`${sDate} ${st}`).format('YYYY-MM-DD HH:mm');
-                      const endIso   = dayjs(`${eDate} ${endFixed}`).format('YYYY-MM-DD HH:mm');
-
-                      if (!dayjs(endIso).isAfter(dayjs(startIso))) return;
-
-                      // カラー #HEX 検証
-                      const color = (formColor || '').trim();
-                      const validColor = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(color) ? color : undefined;
-
-                      // 保存
-                      await createEventLocal({
-                        calendar_id: formCalId,
-                        title: formTitle.trim(),
-                        summary: formSummary.trim(),
-                        color: validColor,
-                        style: tags.length ? { tags } : undefined,
-                        start_at: startIso,
-                        end_at:   endIso,
-                      });
-
-                      // タグリスト更新
-                      if (tags.length) setAllTags(getAllTags());
-
-                      const dStr = dayjs(startIso).format('YYYY-MM-DD');
-                      setRefreshKey(v => v + 1);
-                      if (sheetVisible && sheetDate === dStr) {
-                        setSheetItems((filterEventsByEntity(listInstancesByDate(dStr) ?? [])).slice(0, 50));
-                      }
-
-                      closeAddSheet();
-                    } finally {
-                      (CalendarScreen as any).__saving = false;
-                    }
-                  }}
-                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, backgroundColor: theme.accent }}
-                >
-                  <Text style={{ color: theme.accentText, fontWeight: '800' }}>Save</Text>
+                  <Text style={{ color: theme.textPrimary, fontWeight: '800' }}>キャンセル</Text>
                 </Pressable>
               </View>
             </Animated.View>
@@ -1460,15 +1454,9 @@ export default function CalendarScreen({ navigation }: Props) {
 
       {/* ====== MiniCalendar Overlay ====== */}
       {addVisible && (startCalOpen || endCalOpen) && (
-        <View
-          pointerEvents="box-none"
-          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 20000 }}
-        >
+        <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 20000 }}>
           {/* 背景タップで閉じる */}
-          <Pressable
-            onPress={() => { setStartCalOpen(false); setEndCalOpen(false); }}
-            style={StyleSheet.absoluteFillObject}
-          >
+          <Pressable onPress={() => { setStartCalOpen(false); setEndCalOpen(false); }} style={StyleSheet.absoluteFillObject}>
             <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }} />
           </Pressable>
 
@@ -1498,13 +1486,11 @@ export default function CalendarScreen({ navigation }: Props) {
               }}
               onDayPress={(d: DateData) => {
                 if (startCalOpen) {
-                  // 開始日更新時、終了日が前にならないよう補正
                   setStartDate(d.dateString);
                   if (dayjs(endDate).isBefore(dayjs(d.dateString))) {
                     setEndDate(d.dateString);
                   }
                 } else {
-                  // 終了日選択時、開始日より前なら開始日で固定
                   if (dayjs(d.dateString).isBefore(dayjs(startDate))) {
                     setEndDate(startDate);
                   } else {
@@ -1535,14 +1521,8 @@ export default function CalendarScreen({ navigation }: Props) {
       {/* ====== Time Picker Overlays ====== */}
       {/* Hour */}
       {addVisible && (startTimeOpen || endTimeOpen) && !formAllDay && (
-        <View
-          pointerEvents="box-none"
-          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 20010 }}
-        >
-          <Pressable
-            onPress={() => { setStartTimeOpen(false); setEndTimeOpen(false); }}
-            style={StyleSheet.absoluteFillObject}
-          >
+        <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 20010 }}>
+          <Pressable onPress={() => { setStartTimeOpen(false); setEndTimeOpen(false); }} style={StyleSheet.absoluteFillObject}>
             <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }} />
           </Pressable>
 
@@ -1589,10 +1569,7 @@ export default function CalendarScreen({ navigation }: Props) {
                   const hh = String(h).padStart(2, '0');
                   const next = `${hh}:${String(startMinute ?? 0).padStart(2, '0')}`;
                   setStartTime(next);
-
-                  // 開始時刻更新で終了<開始なら終了=開始
                   ensureEndTimeNotBeforeStart(next, endTime);
-
                   setStartMinuteOpen(true);
                 } else {
                   setEndHour(h);
@@ -1600,10 +1577,7 @@ export default function CalendarScreen({ navigation }: Props) {
                   const hh = String(h).padStart(2, '0');
                   const next = `${hh}:${String(endMinute ?? 0).padStart(2, '0')}`;
                   setEndTime(next);
-
-                  // 終了時刻更新で終了<開始なら終了=開始
                   ensureEndTimeNotBeforeStart(startTime, next);
-
                   setEndMinuteOpen(true);
                 }
               }}
@@ -1616,14 +1590,8 @@ export default function CalendarScreen({ navigation }: Props) {
 
       {/* Minute */}
       {addVisible && (startMinuteOpen || endMinuteOpen) && !formAllDay && (
-        <View
-          pointerEvents="box-none"
-          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 20011 }}
-        >
-          <Pressable
-            onPress={() => { setStartMinuteOpen(false); setEndMinuteOpen(false); }}
-            style={StyleSheet.absoluteFillObject}
-          >
+        <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 20011 }}>
+          <Pressable onPress={() => { setStartMinuteOpen(false); setEndMinuteOpen(false); }} style={StyleSheet.absoluteFillObject}>
             <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }} />
           </Pressable>
 
@@ -1666,8 +1634,6 @@ export default function CalendarScreen({ navigation }: Props) {
                   const next = `${hh}:${mm}`;
                   setStartTime(next);
                   setStartMinuteOpen(false);
-
-                  // 開始時刻更新で終了<開始なら終了=開始
                   ensureEndTimeNotBeforeStart(next, endTime);
                 } else {
                   setEndMinute(m);
@@ -1676,8 +1642,6 @@ export default function CalendarScreen({ navigation }: Props) {
                   const next = `${hh}:${mm}`;
                   setEndTime(next);
                   setEndMinuteOpen(false);
-
-                  // 終了時刻更新で終了<開始なら終了=開始
                   ensureEndTimeNotBeforeStart(startTime, next);
                 }
               }}
