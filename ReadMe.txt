@@ -33,6 +33,10 @@ cd ..
 adb shell run-as com.calect ls -R
 
 
+リリースアプリ
+C:\dev\Calect-mobile\android\app\build\outputs\apk\release
+
+
 
 /src
   /features
