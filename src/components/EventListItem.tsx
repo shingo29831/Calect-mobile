@@ -1,7 +1,7 @@
-// components/EventListItem.tsx
+﻿// components/EventListItem.tsx
 import React, { memo, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-// ✅ タイムゾーン初期化済みの dayjs を使う
+// 笨・繧ｿ繧､繝繧ｾ繝ｼ繝ｳ蛻晄悄蛹匁ｸ医∩縺ｮ dayjs 繧剃ｽｿ縺・
 import dayjs from '../lib/dayjs';
 
 type Props = { title: string; start: string; end: string }; // ISO(UTC)
@@ -17,7 +17,7 @@ const EventListItem = ({ title, start, end }: Props) => {
 
     return sameDay
       ? `${fmtTime(s)} - ${fmtTime(e)}`
-      : `${fmtDate(s)} ${fmtTime(s)} → ${fmtDate(e)} ${fmtTime(e)}`;
+      : `${fmtDate(s)} ${fmtTime(s)} 竊・${fmtDate(e)} ${fmtTime(e)}`;
   }, [start, end]);
 
   return (
@@ -34,7 +34,7 @@ export default memo(EventListItem, (a, b) =>
 
 const styles = StyleSheet.create({
   item: {
-    height: 64, // FlatList の ROW_HEIGHT と合わせる
+    height: 64, // FlatList 縺ｮ ROW_HEIGHT 縺ｨ蜷医ｏ縺帙ｋ
     justifyContent: 'center',
     paddingHorizontal: 12,
     borderBottomWidth: 1,

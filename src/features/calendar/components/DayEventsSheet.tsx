@@ -1,4 +1,4 @@
-// src/screens/calendar/DayEventsSheet.tsx
+﻿// src/features/calendar/components/DayEventsSheet.tsx
 import React, { useEffect, useMemo, useRef } from 'react';
 import {
   Animated,
@@ -10,13 +10,22 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useAppTheme } from '../../theme';
+import { useAppTheme } from '../../../theme';
 
-// 既存の型そのまま（無ければ any でもOK）
+/**
+ * 使い方メモ:
+ * - `visible`: シート表示のON/OFF
+ * - `height`: 画面から受け取る実高さ（折りたたみ/全開の基準）
+ * - `date`: 対象日（表示用）
+ * - `items`: 表示するイベント行
+ * - `onClose`: バックドロップや下方向スワイプで閉じるときに呼ばれる
+ * - `onEndReached`: 末尾付近までスクロールしたときに追加読み込み
+ * - `rowHeight`: 1行あたりの高さ
+ */
 type Props = {
   visible: boolean;
-  sheetY: Animated.Value; // 既存: 表示/非表示のトランスレーションに使っているならそのまま受け取る（使わないなら無視でOK）
-  height: number;         // 画面に対する最大高さ（CalendarScreenから渡す）
+  sheetY: Animated.Value; // （互換のため残す。内部では height を使用）
+  height: number;
   date: string;
   items: any[];
   onClose: () => void;
@@ -24,9 +33,9 @@ type Props = {
   rowHeight: number;
 };
 
-const SNAP_RATIO_COLLAPSED = 0.45; // 初期の縮小比（45%）
-const DRAG_CLOSE_THRESHOLD_PX = 80;
-const DRAG_CLOSE_VELOCITY = 1.0;
+const SNAP_RATIO_COLLAPSED = 0.45; // 折りたたみ時の高さ（画面の45%）
+const DRAG_CLOSE_THRESHOLD_PX = 80; // 下方向ドラッグ距離でクローズ
+const DRAG_CLOSE_VELOCITY = 1.0;    // 速度でクローズ判定する閾値
 
 export default function DayEventsSheet({
   visible,
@@ -39,18 +48,18 @@ export default function DayEventsSheet({
 }: Props) {
   const theme = useAppTheme();
 
-  // 高さスナップ（collapsed <-> expanded）を1本の Animated.Value で管理
-  const expandedH = height;                      // 最大展開
+  // 折りたたみ <-> 全開 を1本の Animated.Value で管理
+  const expandedH = height;
   const collapsedH = Math.max(200, height * SNAP_RATIO_COLLAPSED);
   const sheetHeight = useRef(new Animated.Value(collapsedH)).current;
 
-  // 表示/非表示のフェード（半透明の背景）
+  // バックドロップのフェード
   const overlayOpacity = useRef(new Animated.Value(0)).current;
 
-  // シートの角丸・枠色など（必要に応じて調整）
+  // つまみ（ドラッグハンドル）の色はテーマから
   const handleColor = useMemo(() => theme.border, [theme.border]);
 
-  // visible 変化でフェード
+  // visible の変化に応じてフェード/高さを調整
   useEffect(() => {
     Animated.timing(overlayOpacity, {
       toValue: visible ? 1 : 0,
@@ -58,12 +67,12 @@ export default function DayEventsSheet({
       useNativeDriver: true,
     }).start();
     if (!visible) {
-      // 非表示にする際は高さも一旦 collapsed に戻しておくと次回の初期状態が安定
+      // 非表示にする時は高さを畳んだ状態へ戻す
       sheetHeight.setValue(collapsedH);
     }
   }, [visible, overlayOpacity, collapsedH, sheetHeight]);
 
-  // 展開/縮小のアニメ
+  // 開閉アニメーション
   const expand = () => {
     Animated.spring(sheetHeight, {
       toValue: expandedH,
@@ -81,12 +90,12 @@ export default function DayEventsSheet({
     }).start();
   };
 
-  // ハンドルのドラッグで下に強く引いたら閉じる、そうでなければスナップ
+  // ドラッグ操作
   const dragY = useRef(0);
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gesture) => {
-        // 縦方向に少しでもドラッグしたら奪う
+        // 縦方向に一定以上動いたらパン開始
         return Math.abs(gesture.dy) > 4;
       },
       onPanResponderGrant: () => {
@@ -94,18 +103,21 @@ export default function DayEventsSheet({
       },
       onPanResponderMove: (_, gesture) => {
         dragY.current = gesture.dy;
-        // 指に追従して高さを可変（上に引くと増える、下に引くと減る）
-        const next = Math.min(expandedH, Math.max(collapsedH, (sheetHeight as any).__getValue() - gesture.dy));
+        // 現在の高さからドラッグ量を反映し、範囲内にクランプ
+        const next = Math.min(
+          expandedH,
+          Math.max(collapsedH, (sheetHeight as any).__getValue() - gesture.dy)
+        );
         sheetHeight.setValue(next);
       },
       onPanResponderRelease: (_, gesture) => {
         const { dy, vy } = gesture;
-        // 強い下方向 or 一定距離でクローズ
+        // 一定距離 or 速度で下方向なら閉じる
         if (dy > DRAG_CLOSE_THRESHOLD_PX || vy > DRAG_CLOSE_VELOCITY) {
           onClose();
           return;
         }
-        // それ以外はスナップ（動いた方向で判断）
+        // 途中位置の場合は中間値で開く/閉じるを決める
         const halfway = (expandedH + collapsedH) / 2;
         const current = (sheetHeight as any).__getValue();
         if (current >= halfway || dy < 0) {
@@ -115,7 +127,7 @@ export default function DayEventsSheet({
         }
       },
       onPanResponderTerminate: () => {
-        // 中断時は現在位置でスナップ
+        // ジェスチャ中断時も中間値でスナップ
         const halfway = (expandedH + collapsedH) / 2;
         const current = (sheetHeight as any).__getValue();
         if (current >= halfway) expand();
@@ -128,7 +140,7 @@ export default function DayEventsSheet({
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      {/* ===== 背景オーバーレイ（外側タップで閉じる） ===== */}
+      {/* ===== バックドロップ（タップで閉じる） ===== */}
       <Pressable
         style={StyleSheet.absoluteFill}
         onPress={onClose}
@@ -149,14 +161,13 @@ export default function DayEventsSheet({
           {
             backgroundColor: theme.surface,
             borderTopColor: theme.border,
-            height: sheetHeight,    // 高さで collapsed/expanded を表現
+            height: sheetHeight, // 折りたたみ/全開をこの値で切り替え
           },
         ]}
-        // シート全体タップ → 最大化
-        // （リストアイテムの Pressable と競合させないため、header 領域を主にタップ対象にしてあります）
+        // 内側の Pressable と競合させない
         onStartShouldSetResponder={() => false}
       >
-        {/* つまみ（ドラッグ操作 & タップで最大化） */}
+        {/* つまみ領域（ドラッグで開閉 / タップで展開） */}
         <Pressable
           onPress={expand}
           {...panResponder.panHandlers}
@@ -165,7 +176,7 @@ export default function DayEventsSheet({
           <View style={[styles.handle, { backgroundColor: handleColor }]} />
         </Pressable>
 
-        {/* ヘッダー（タップで最大化） */}
+        {/* ヘッダー（タイトル＋件数） */}
         <Pressable onPress={expand} style={[styles.header, { borderBottomColor: theme.border }]}>
           <Text style={[styles.title, { color: theme.textPrimary }]}>{date}</Text>
           <Text style={[styles.count, { color: theme.textSecondary }]}>
@@ -173,13 +184,13 @@ export default function DayEventsSheet({
           </Text>
         </Pressable>
 
-        {/* リスト */}
+        {/* リスト本体 */}
         <FlatList
           data={items}
           keyExtractor={(_, i) => String(i)}
           renderItem={({ item }) => (
             <View style={[styles.row, { height: rowHeight, borderBottomColor: theme.border }]}>
-              {/* ここは既存の EventListItem を使ってもOK。最小構成にしています */}
+              {/* NOTE: 必要になったら専用の <EventListItem /> へ差し替え */}
               <Text style={{ color: theme.textPrimary, fontSize: 14, fontWeight: '600' }}>
                 {item?.title ?? 'Untitled'}
               </Text>
@@ -209,7 +220,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 0,             // 下から生やす
+    bottom: 0, // 画面下からスライドイン
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
@@ -249,3 +260,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 });
+
+export {};

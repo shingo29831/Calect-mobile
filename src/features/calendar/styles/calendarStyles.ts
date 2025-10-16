@@ -1,6 +1,6 @@
-// src/screens/calendar/calendarStyles.ts
+﻿// src/screens/calendar/calendarStyles.ts
 import { StyleSheet } from 'react-native';
-import { SCREEN_H, SCREEN_W, LINE_W, LINE_COLOR, HAIR_SAFE, SIDE_PAD } from '../CalendarParts';
+import { SCREEN_H, SCREEN_W, LINE_W, LINE_COLOR, HAIR_SAFE, SIDE_PAD } from '../components/CalendarParts';
 
 export const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
@@ -46,8 +46,8 @@ export const styles = StyleSheet.create({
   pillTextActive: { color: '#fff' },
 
   /* ===== Calendar area (baseline for pageHeight/cellH) =====
-   * 縦方向の padding / margin / border は入れない（高さズレ防止）
-   * 左右の内側余白のみ適用（横方向は pageHeight に無関係）
+   * 邵ｦ譁ｹ蜷代・ padding / margin / border 縺ｯ蜈･繧後↑縺・ｼ磯ｫ倥＆繧ｺ繝ｬ髦ｲ豁｢・・
+   * 蟾ｦ蜿ｳ縺ｮ蜀・・菴咏區縺ｮ縺ｿ驕ｩ逕ｨ・域ｨｪ譁ｹ蜷代・ pageHeight 縺ｫ辟｡髢｢菫ゑｼ・
    */
   gridBlock: {
     flex: 1,
@@ -61,7 +61,7 @@ export const styles = StyleSheet.create({
     paddingRight: SIDE_PAD,
   },
 
-  // CalendarList の直親。縦余白ゼロで高さ汚さない
+  // CalendarList 縺ｮ逶ｴ隕ｪ縲らｸｦ菴咏區繧ｼ繝ｭ縺ｧ鬮倥＆豎壹＆縺ｪ縺・
   gridInner: {
     paddingTop: 0,
     paddingBottom: 0,

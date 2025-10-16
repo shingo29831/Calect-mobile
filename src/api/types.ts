@@ -1,32 +1,32 @@
-// src/api/types.ts
+﻿// src/api/types.ts
 // ========================================================
-// Calect Schema v2（ローカル保存JSONに準拠）
-// ＋ 既存UI互換の最小型 (Calendar / Event / EventInstance / ULID)
+// Calect Schema v2・医Ο繝ｼ繧ｫ繝ｫ菫晏ｭ労SON縺ｫ貅匁侠・・
+// ・・譌｢蟄篭I莠呈鋤縺ｮ譛蟆丞梛 (Calendar / Event / EventInstance / ULID)
 // --------------------------------------------------------
-// - Server 側保存物は ServerDocV2 配下の profile/sync/tombstones/entities
-// - UI 既存コードは Calendar, Event, EventInstance を参照するため残置
-//   * Calendar/Event は v2項目をオプショナルに内包し互換にしています
+// - Server 蛛ｴ菫晏ｭ倡黄縺ｯ ServerDocV2 驟堺ｸ九・ profile/sync/tombstones/entities
+// - UI 譌｢蟄倥さ繝ｼ繝峨・ Calendar, Event, EventInstance 繧貞盾辣ｧ縺吶ｋ縺溘ａ谿狗ｽｮ
+//   * Calendar/Event 縺ｯ v2鬆・岼繧偵が繝励す繝ｧ繝翫Ν縺ｫ蜀・桁縺嶺ｺ呈鋤縺ｫ縺励※縺・∪縺・
 // ========================================================
 
-/** 26文字の ULID（Base32） */
+/** 26譁・ｭ励・ ULID・・ase32・・*/
 export type ULID = string;
 
 // --------------------------------------------------------
-// 既存UI互換（最小）
+// 譌｢蟄篭I莠呈鋤・域怙蟆擾ｼ・
 // --------------------------------------------------------
 
-/** 既存UIが参照している最小カレンダー型（v2項目をオプショナルで包含） */
+/** 譌｢蟄篭I縺悟盾辣ｧ縺励※縺・ｋ譛蟆上き繝ｬ繝ｳ繝繝ｼ蝙具ｼ・2鬆・岼繧偵が繝励す繝ｧ繝翫Ν縺ｧ蛹・性・・*/
 export type Calendar = {
   calendar_id: ULID;
   name: string;
-  /** 互換: 既存UI用。サーバ保存では HEX (#2563EB など) */
+  /** 莠呈鋤: 譌｢蟄篭I逕ｨ縲ゅし繝ｼ繝蝉ｿ晏ｭ倥〒縺ｯ HEX (#2563EB 縺ｪ縺ｩ) */
   color?: string | null;
-  /** 互換: 既存UI用（v2では profile / org / group と共有で表現） */
+  /** 莠呈鋤: 譌｢蟄篭I逕ｨ・・2縺ｧ縺ｯ profile / org / group 縺ｨ蜈ｱ譛峨〒陦ｨ迴ｾ・・*/
   tz?: string;
-  /** 互換: 既存UI用 */
+  /** 莠呈鋤: 譌｢蟄篭I逕ｨ */
   visibility?: 'private' | 'org' | 'public';
 
-  // --- v2 追加項目（必要に応じて利用） ---
+  // --- v2 霑ｽ蜉鬆・岼・亥ｿ・ｦ√↓蠢懊§縺ｦ蛻ｩ逕ｨ・・---
   owner_user_id?: string | null;
   owner_group_id?: string | null;
   calendar_shares?: Array<{
@@ -38,40 +38,40 @@ export type Calendar = {
   deleted_at?: string | null;
 };
 
-/** 既存UIがローカル作成時に使う最小イベント型（UI都合で ISO を保持） */
+/** 譌｢蟄篭I縺後Ο繝ｼ繧ｫ繝ｫ菴懈・譎ゅ↓菴ｿ縺・怙蟆上う繝吶Φ繝亥梛・・I驛ｽ蜷医〒 ISO 繧剃ｿ晄戟・・*/
 export type Event = {
   event_id: ULID;
   calendar_id: ULID;
   title: string;
   summary?: string | null;
-  /** 既存UI互換：ISO8601日時（例: 2025-10-08T09:30:00+09:00） */
+  /** 譌｢蟄篭I莠呈鋤・唔SO8601譌･譎ゑｼ井ｾ・ 2025-10-08T09:30:00+09:00・・*/
   start_at: string;
   end_at: string;
 
-  /** 既存UI互換：可視範囲 */
+  /** 譌｢蟄篭I莠呈鋤・壼庄隕也ｯ・峇 */
   visibility: 'inherit' | 'private' | 'org' | 'public' | 'link';
 };
 
-/** 既存UIがカレンダー描画に使う最小インスタンス型（展開済み1件） */
+/** 譌｢蟄篭I縺後き繝ｬ繝ｳ繝繝ｼ謠冗判縺ｫ菴ｿ縺・怙蟆上う繝ｳ繧ｹ繧ｿ繝ｳ繧ｹ蝙具ｼ亥ｱ暮幕貂医∩1莉ｶ・・*/
 export type EventInstance = {
-  /** 既存UI互換：数値ID（Date.now() 由来など） */
+  /** 譌｢蟄篭I莠呈鋤・壽焚蛟､ID・・ate.now() 逕ｱ譚･縺ｪ縺ｩ・・*/
   instance_id: number;
   calendar_id: ULID;
   event_id: ULID;
   title: string;
-  /** ISO8601（UI描画はこれを使用） */
+  /** ISO8601・・I謠冗判縺ｯ縺薙ｌ繧剃ｽｿ逕ｨ・・*/
   start_at: string;
   end_at: string;
 };
 
 // --------------------------------------------------------
-// v2 サーバ保存ドキュメント（ローカルJSON）
+// v2 繧ｵ繝ｼ繝蝉ｿ晏ｭ倥ラ繧ｭ繝･繝｡繝ｳ繝茨ｼ医Ο繝ｼ繧ｫ繝ｫJSON・・
 // --------------------------------------------------------
 
 export type ProfileV2 = {
   current_user_id: string;
-  default_tz: string;          // 例: "Asia/Tokyo"
-  locale: string;              // 例: "ja-JP"
+  default_tz: string;          // 萓・ "Asia/Tokyo"
+  locale: string;              // 萓・ "ja-JP"
   profile_image_path?: string | null;
   username?: string | null;
   username_url?: string | null; // ^[a-z0-9-]{3,32}$
@@ -115,9 +115,9 @@ export type TombstonesV2 = {
 export type OrganizationV2 = {
   org_id: string;
   name: string;
-  plan: string;   // 例: "free" | "pro" | "enterprise"
-  locale: string; // 例: "ja-JP"
-  tz: string;     // 例: "Asia/Tokyo"
+  plan: string;   // 萓・ "free" | "pro" | "enterprise"
+  locale: string; // 萓・ "ja-JP"
+  tz: string;     // 萓・ "Asia/Tokyo"
 };
 
 export type FollowV2 = {
@@ -158,7 +158,7 @@ export type CalendarShareV2 = {
 };
 
 export type CalendarV2 = {
-  calendar_id: string; // ULIDを想定
+  calendar_id: string; // ULID繧呈Φ螳・
   owner_user_id: string | null;
   owner_group_id: string | null;
   name: string;
@@ -169,21 +169,21 @@ export type CalendarV2 = {
 };
 
 export type EventRecurrenceV2 = {
-  /** RFC5545 RRULE 例: FREQ=WEEKLY;BYDAY=MO,WE,FR */
+  /** RFC5545 RRULE 萓・ FREQ=WEEKLY;BYDAY=MO,WE,FR */
   rrule: string;
-  /** 開始基準（TZ必須）例: 2025-10-08T09:30:00+09:00 */
+  /** 髢句ｧ句渕貅厄ｼ・Z蠢・茨ｼ我ｾ・ 2025-10-08T09:30:00+09:00 */
   dtstart: string;
-  /** 除外日時 */
+  /** 髯､螟匁律譎・*/
   exdates?: string[];
-  /** 追加日時 */
+  /** 霑ｽ蜉譌･譎・*/
   rdates?: string[];
-  /** 期間終了 */
+  /** 譛滄俣邨ゆｺ・*/
   until?: string | null;
 };
 
 export type EventOverrideV2 = {
   occurrence_date: string; // YYYY-MM-DD
-  cancelled?: boolean;     // trueなら他フィールド無視
+  cancelled?: boolean;     // true縺ｪ繧我ｻ悶ヵ繧｣繝ｼ繝ｫ繝臥┌隕・
   title?: string;
   summary?: string;
   start_at?: string;       // HH:mm
@@ -198,7 +198,7 @@ export type EventV2 = {
   calendar_id: string;
   title: string;
   summary?: string | null;
-  /** 開始/終了時刻（ローカル時刻の HH:mm 表記） */
+  /** 髢句ｧ・邨ゆｺ・凾蛻ｻ・医Ο繝ｼ繧ｫ繝ｫ譎ょ綾縺ｮ HH:mm 陦ｨ險假ｼ・*/
   start_at: string; // e.g. "09:30"
   end_at: string;   // e.g. "10:30"
 
@@ -208,16 +208,16 @@ export type EventV2 = {
     content_visibility?: 'busy' | 'full' | 'summary';
   }>;
   followers_share?: boolean | string;
-  link_token?: string | null; // Base62 22–32 chars, 短期TTL推奨
+  link_token?: string | null; // Base62 22窶・2 chars, 遏ｭ譛鬱TL謗ｨ螂ｨ
   priority?: 'low' | 'normal' | 'high';
 
-  /** 繰り返し設定 */
+  /** 郢ｰ繧願ｿ斐＠險ｭ螳・*/
   recurrence?: EventRecurrenceV2;
 
-  /** 個別発生の上書き */
+  /** 蛟句挨逋ｺ逕溘・荳頑嶌縺・*/
   overrides?: EventOverrideV2[];
 
-  /** タグ */
+  /** 繧ｿ繧ｰ */
   tags?: EventTagRefV2[];
 
   updated_by: string;
@@ -238,7 +238,7 @@ export type EventTagV2 = {
 };
 
 export type PlanV2 = {
-  plan_code: string; // "free" など
+  plan_code: string; // "free" 縺ｪ縺ｩ
   name: string;
   summary?: string | null;
   max_group_members_per_group: number;
@@ -261,7 +261,7 @@ export type SubscriptionV2 = {
   updated_at: string;
 };
 
-// ---------- Entities 集約 ----------
+// ---------- Entities 髮・ｴ・----------
 
 export type EntitiesV2 = {
   organizations: Record<string, OrganizationV2>;
@@ -276,7 +276,7 @@ export type EntitiesV2 = {
   subscriptions: Record<string, SubscriptionV2>;
 };
 
-// ---------- ルートドキュメント ----------
+// ---------- 繝ｫ繝ｼ繝医ラ繧ｭ繝･繝｡繝ｳ繝・----------
 
 export type ServerDocV2 = {
   version: 2;
@@ -287,7 +287,7 @@ export type ServerDocV2 = {
 };
 
 // ========================================================
-// 参考: UIやストアからは従来通り
+// 蜿り・ UI繧・せ繝医い縺九ｉ縺ｯ蠕捺擂騾壹ｊ
 //  - import type { Calendar, Event, EventInstance, ULID } from '../api/types';
-// を使えます。サーバ保存物を扱う場合は ServerDocV2 / EntitiesV2 等を参照してください。
+// 繧剃ｽｿ縺医∪縺吶ゅし繝ｼ繝蝉ｿ晏ｭ倡黄繧呈桶縺・ｴ蜷医・ ServerDocV2 / EntitiesV2 遲峨ｒ蜿ら・縺励※縺上□縺輔＞縲・
 // ========================================================

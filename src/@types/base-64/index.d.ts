@@ -1,7 +1,7 @@
-declare module 'base-64' {
-  /** 入力は UTF-16 文字列、返り値は Base64 文字列 */
+﻿declare module 'base-64' {
+  /** 蜈･蜉帙・ UTF-16 譁・ｭ怜・縲∬ｿ斐ｊ蛟､縺ｯ Base64 譁・ｭ怜・ */
   export function encode(input: string): string;
-  /** 入力は Base64 文字列、返り値は UTF-16 文字列 */
+  /** 蜈･蜉帙・ Base64 譁・ｭ怜・縲∬ｿ斐ｊ蛟､縺ｯ UTF-16 譁・ｭ怜・ */
   export function decode(input: string): string;
 
   const _default: {

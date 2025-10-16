@@ -1,4 +1,4 @@
-// 共通エントリ。旧アーキ/新アーキ両対応の薄いラッパ
+﻿// 蜈ｱ騾壹お繝ｳ繝医Μ縲よ立繧｢繝ｼ繧ｭ/譁ｰ繧｢繝ｼ繧ｭ荳｡蟇ｾ蠢懊・阮・＞繝ｩ繝・ヱ
 import { NativeModules, Platform } from 'react-native';
 
 type SaveResult = { ok: true } | { ok: false; error: string };
@@ -11,7 +11,7 @@ export type SecureStoreModule = {
 
 const legacy = NativeModules.SecureStore as SecureStoreModule | undefined;
 
-// TurboModule 化している場合はこちらに差し替え:
+// TurboModule 蛹悶＠縺ｦ縺・ｋ蝣ｴ蜷医・縺薙■繧峨↓蟾ｮ縺玲崛縺・
 // import { TurboModuleRegistry } from 'react-native';
 // const turbo = TurboModuleRegistry.getEnforcing<SecureStoreModule>('SecureStore');
 
@@ -30,7 +30,7 @@ export const SecureStore: SecureStoreModule = {
   },
 };
 
-// ユーティリティ：JSON 直列化
+// 繝ｦ繝ｼ繝・ぅ繝ｪ繝・ぅ・哽SON 逶ｴ蛻怜喧
 export async function saveJson(name: string, obj: any) {
   const s = JSON.stringify(obj);
   const r = await SecureStore.saveEncrypted(name, s);

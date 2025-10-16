@@ -1,4 +1,4 @@
-// src/screens/calendar/hooks/useAnimatedDrawer.ts
+﻿// src/screens/calendar/hooks/useAnimatedDrawer.ts
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing } from 'react-native';
 

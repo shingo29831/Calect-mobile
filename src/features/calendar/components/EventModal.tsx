@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { View, Text, TextInput, Button, Alert } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../navigation';
+import type { RootStackParamList } from '../../../navigation';
 import dayjs from 'dayjs';
-import { createEventLocal } from '../store/db';
+import { createEventLocal } from '../../../store/db';
 
 
 export default function EventModal({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'EventModal'>){

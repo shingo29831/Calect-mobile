@@ -1,22 +1,22 @@
-// src/store/appData.ts
+﻿// src/store/appData.ts
 
 // ===============================================
 // AppData container (server v2 / client prefs v1)
 // ===============================================
 
 export type AppData = {
-  server?: ServerDocV2 | unknown; // サーバ同期ドキュメント（version:2想定・最小定義）
-  prefs?: ClientPrefsV1 | unknown; // クライアント設定（version:1）
+  server?: ServerDocV2 | unknown; // 繧ｵ繝ｼ繝仙酔譛溘ラ繧ｭ繝･繝｡繝ｳ繝茨ｼ・ersion:2諠ｳ螳壹・譛蟆丞ｮ夂ｾｩ・・
+  prefs?: ClientPrefsV1 | unknown; // 繧ｯ繝ｩ繧､繧｢繝ｳ繝郁ｨｭ螳夲ｼ・ersion:1・・
 };
 
-// -------- Server v2 (最小の型：必要になったら拡張) --------
+// -------- Server v2 (譛蟆上・蝙具ｼ壼ｿ・ｦ√↓縺ｪ縺｣縺溘ｉ諡｡蠑ｵ) --------
 export type ServerDocV2 = {
   version: 2;
-  // 今回UIでは未使用。必要になったら定義を足してください。
+  // 莉雁屓UI縺ｧ縺ｯ譛ｪ菴ｿ逕ｨ縲ょｿ・ｦ√↓縺ｪ縺｣縺溘ｉ螳夂ｾｩ繧定ｶｳ縺励※縺上□縺輔＞縲・
   // profile, entities, calendars, events ...etc
 };
 
-// -------- Client Prefs v1（今回UIで使う部分を厳密化） --------
+// -------- Client Prefs v1・井ｻ雁屓UI縺ｧ菴ｿ縺・Κ蛻・ｒ蜴ｳ蟇・喧・・--------
 export type ClientPrefsV1 = {
   version: 1;
   meta?: {
@@ -32,7 +32,7 @@ export type ClientPrefsV1 = {
     string,
     {
       background_image?: string | null;
-      /** ← 追加: カレンダーの小アイコンURI（file://, content://, https:// など） */
+      /** 竊・霑ｽ蜉: 繧ｫ繝ｬ繝ｳ繝繝ｼ縺ｮ蟆上い繧､繧ｳ繝ｳURI・・ile://, content://, https:// 縺ｪ縺ｩ・・*/
       icon_image_path?: string | null;
 
       event_style_default?: {
@@ -89,7 +89,7 @@ export type ClientPrefsV1 = {
     reschedule_after_boot?: boolean;
   };
 
-  // 以降のセクションは今回UIでは未使用（必要時に参照）
+  // 莉･髯阪・繧ｻ繧ｯ繧ｷ繝ｧ繝ｳ縺ｯ莉雁屓UI縺ｧ縺ｯ譛ｪ菴ｿ逕ｨ・亥ｿ・ｦ∵凾縺ｫ蜿ら・・・
   sync?: unknown;
   storage?: unknown;
   display?: {
@@ -108,15 +108,15 @@ export type ClientPrefsV1 = {
 };
 
 // -----------------------------------------------
-// 実体（テスト用データを定義）
-//  - 必要ならネイティブや起動時ロードで上書きされる想定
+// 螳滉ｽ難ｼ医ユ繧ｹ繝育畑繝・・繧ｿ繧貞ｮ夂ｾｩ・・
+//  - 蠢・ｦ√↑繧峨ロ繧､繝・ぅ繝悶ｄ襍ｷ蜍墓凾繝ｭ繝ｼ繝峨〒荳頑嶌縺阪＆繧後ｋ諠ｳ螳・
 // -----------------------------------------------
 
 export const server: ServerDocV2 | undefined = {
   version: 2,
 };
 
-// ✅ ここにテスト用の背景画像設定を入れています
+// 笨・縺薙％縺ｫ繝・せ繝育畑縺ｮ閭梧勹逕ｻ蜒剰ｨｭ螳壹ｒ蜈･繧後※縺・∪縺・
 export const prefs: ClientPrefsV1 | undefined = {
   version: 1,
   meta: {
@@ -139,25 +139,25 @@ export const prefs: ClientPrefsV1 | undefined = {
     },
   },
   calendars: {
-    // あなたのアプリ側でデフォルト利用しているIDに合わせておくと拾われます
-    // （例：CAL_LOCAL_DEFAULT）
+    // 縺ゅ↑縺溘・繧｢繝励Μ蛛ｴ縺ｧ繝・ヵ繧ｩ繝ｫ繝亥茜逕ｨ縺励※縺・ｋID縺ｫ蜷医ｏ縺帙※縺翫￥縺ｨ諡ｾ繧上ｌ縺ｾ縺・
+    // ・井ｾ具ｼ咾AL_LOCAL_DEFAULT・・
     CAL_LOCAL_DEFAULT: {
-    //   // ▼ 好きな画像URLに差し替えてOK（https/file/content スキーム対応）
+    //   // 笆ｼ 螂ｽ縺阪↑逕ｻ蜒酋RL縺ｫ蟾ｮ縺玲崛縺医※OK・・ttps/file/content 繧ｹ繧ｭ繝ｼ繝蟇ｾ蠢懶ｼ・
     //   background_image:
     //     'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?q=80&w=1600&auto=format&fit=crop',
       icon_image_path:
         'https://images.unsplash.com/photo-1544006659-f0b21884ce1d?q=80&w=100&auto=format&fit=crop',
       event_style_default: {
-        // ダークテーマでのデフォルト色（必要なら）
+        // 繝繝ｼ繧ｯ繝・・繝槭〒縺ｮ繝・ヵ繧ｩ繝ｫ繝郁牡・亥ｿ・ｦ√↑繧会ｼ・
         font_color: '#e2e8f0',
         background_color: 'rgba(96,165,250,0.12)',
         border_color: '#60a5fa',
       },
     },
 
-    // 追加のカレンダー例
+    // 霑ｽ蜉縺ｮ繧ｫ繝ｬ繝ｳ繝繝ｼ萓・
     CAL_TEAM: {
-      background_image: null, // 背景なし（APP_BGで表示される想定）
+      background_image: null, // 閭梧勹縺ｪ縺暦ｼ・PP_BG縺ｧ陦ｨ遉ｺ縺輔ｌ繧区Φ螳夲ｼ・
       icon_image_path: null,
       event_style_default: {
         font_color: '#e2e8f0',
@@ -168,7 +168,7 @@ export const prefs: ClientPrefsV1 | undefined = {
   },
 };
 
-// 既存API（互換）
+// 譌｢蟄連PI・井ｺ呈鋤・・
 export function getAppData(): AppData {
   return { server, prefs };
 }
@@ -184,28 +184,28 @@ function isClientPrefsV1(v: any): v is ClientPrefsV1 {
 // Safe getters for UI
 // ===============================================
 
-/** 指定カレンダーの prefs を返す（なければ undefined） */
+/** 謖・ｮ壹き繝ｬ繝ｳ繝繝ｼ縺ｮ prefs 繧定ｿ斐☆・医↑縺代ｌ縺ｰ undefined・・*/
 export function getCalendarPrefs(calendarId?: string | null) {
   if (!isClientPrefsV1(prefs)) return undefined;
   const id = calendarId ? String(calendarId) : '';
   return prefs.calendars?.[id];
 }
 
-/** カレンダーの背景画像URI（未設定なら undefined） */
+/** 繧ｫ繝ｬ繝ｳ繝繝ｼ縺ｮ閭梧勹逕ｻ蜒酋RI・域悴險ｭ螳壹↑繧・undefined・・*/
 export function getCalendarBackgroundImage(calendarId?: string | null): string | undefined {
   const p = getCalendarPrefs(calendarId);
   const raw = p?.background_image ?? undefined;
   return raw ? String(raw) : undefined;
 }
 
-/** カレンダーのアイコン画像URI（未設定なら undefined） */
+/** 繧ｫ繝ｬ繝ｳ繝繝ｼ縺ｮ繧｢繧､繧ｳ繝ｳ逕ｻ蜒酋RI・域悴險ｭ螳壹↑繧・undefined・・*/
 export function getCalendarIconPath(calendarId?: string | null): string | undefined {
   const p = getCalendarPrefs(calendarId);
   const raw = p?.icon_image_path ?? undefined;
   return raw ? String(raw) : undefined;
 }
 
-/** カレンダーの既定イベントスタイル（未設定なら空オブジェクト） */
+/** 繧ｫ繝ｬ繝ｳ繝繝ｼ縺ｮ譌｢螳壹う繝吶Φ繝医せ繧ｿ繧､繝ｫ・域悴險ｭ螳壹↑繧臥ｩｺ繧ｪ繝悶ず繧ｧ繧ｯ繝茨ｼ・*/
 export function getCalendarEventDefaultStyle(calendarId?: string | null): {
   font_family?: string;
   font_color?: string;
@@ -215,12 +215,12 @@ export function getCalendarEventDefaultStyle(calendarId?: string | null): {
   const p = getCalendarPrefs(calendarId);
   return (
     p?.event_style_default ?? {
-      // デフォルトは空。UI側でフォールバック色を当てる想定
+      // 繝・ヵ繧ｩ繝ｫ繝医・遨ｺ縲６I蛛ｴ縺ｧ繝輔か繝ｼ繝ｫ繝舌ャ繧ｯ濶ｲ繧貞ｽ薙※繧区Φ螳・
     }
   );
 }
 
-/** ユーザのニックネーム（未設定なら undefined） */
+/** 繝ｦ繝ｼ繧ｶ縺ｮ繝九ャ繧ｯ繝阪・繝・域悴險ｭ螳壹↑繧・undefined・・*/
 export function getNickname(userId?: string | null): string | undefined {
   if (!isClientPrefsV1(prefs)) return undefined;
   const id = userId ? String(userId) : '';

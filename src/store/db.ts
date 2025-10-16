@@ -1,19 +1,19 @@
-// src/store/db.ts
+﻿// src/store/db.ts
 // ===============================================
-// 単純メモリDB + ローカル保存（snapshot / ops.ndjson）
-// - createEventLocal: 追加直後に非同期でローカル保存（タグも永続化）
-// - replaceAllInstances: 同期などでインメモリを丸ごと差し替え
-// - listInstancesByDate: 指定日のインスタンスを取得（ローカル日）
-// - getAllTags: 既存タグ一覧を取得（永続化）
-// - 変更通知: subscribeDb / unsubscribeDb / emit
+// 蜊倡ｴ斐Γ繝｢繝ｪDB + 繝ｭ繝ｼ繧ｫ繝ｫ菫晏ｭ假ｼ・napshot / ops.ndjson・・
+// - createEventLocal: 霑ｽ蜉逶ｴ蠕後↓髱槫酔譛溘〒繝ｭ繝ｼ繧ｫ繝ｫ菫晏ｭ假ｼ医ち繧ｰ繧よｰｸ邯壼喧・・
+// - replaceAllInstances: 蜷梧悄縺ｪ縺ｩ縺ｧ繧､繝ｳ繝｡繝｢繝ｪ繧剃ｸｸ縺斐→蟾ｮ縺玲崛縺・
+// - listInstancesByDate: 謖・ｮ壽律縺ｮ繧､繝ｳ繧ｹ繧ｿ繝ｳ繧ｹ繧貞叙蠕暦ｼ医Ο繝ｼ繧ｫ繝ｫ譌･・・
+// - getAllTags: 譌｢蟄倥ち繧ｰ荳隕ｧ繧貞叙蠕暦ｼ域ｰｸ邯壼喧・・
+// - 螟画峩騾夂衍: subscribeDb / unsubscribeDb / emit
 // ===============================================
 
 import dayjs from '../lib/dayjs';
 import type { EventInstance, Event, ULID } from '../api/types';
 import { startOfLocalDay, endOfLocalDay } from '../utils/time';
-import { loadLocalStore, saveLocalStore, appendOps } from './localFile';
+import { loadLocalStore, saveLocalStore, appendOps } from './localFile.ts';
 
-// ====== ULID 生成（Event.event_id 用：Crockford Base32, 長さ26） ======
+// ====== ULID 逕滓・・・vent.event_id 逕ｨ・咾rockford Base32, 髟ｷ縺・6・・======
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 function ulid(now = Date.now()): ULID {
   let ts = now;
@@ -33,14 +33,14 @@ function ulid(now = Date.now()): ULID {
   return (timeChars + rand) as ULID;
 }
 
-// ====== メモリ保持（既存UI互換：インスタンス配列 & タグ） ======
+// ====== 繝｡繝｢繝ｪ菫晄戟・域里蟄篭I莠呈鋤・壹う繝ｳ繧ｹ繧ｿ繝ｳ繧ｹ驟榊・ & 繧ｿ繧ｰ・・======
 let instances: EventInstance[] = [];
-let tagsSet = new Set<string>(); // 既存タグ（永続化）
+let tagsSet = new Set<string>(); // 譌｢蟄倥ち繧ｰ・域ｰｸ邯壼喧・・
 
-// 初期ロード（存在すれば）
+// 蛻晄悄繝ｭ繝ｼ繝会ｼ亥ｭ伜惠縺吶ｌ縺ｰ・・
 (async () => {
   try {
-    const storeAny: any = await loadLocalStore(); // any で拡張フィールド(tags)を許容
+    const storeAny: any = await loadLocalStore(); // any 縺ｧ諡｡蠑ｵ繝輔ぅ繝ｼ繝ｫ繝・tags)繧定ｨｱ螳ｹ
     instances = Array.isArray(storeAny.instances) ? storeAny.instances : [];
     const tagsSrc: unknown[] =
       Array.isArray(storeAny.tags) ? storeAny.tags :
@@ -52,7 +52,7 @@ let tagsSet = new Set<string>(); // 既存タグ（永続化）
   }
 })();
 
-// ====== 変更通知 ======
+// ====== 螟画峩騾夂衍 ======
 type Listener = () => void;
 const listeners = new Set<Listener>();
 function emitDbChanged() {
@@ -67,17 +67,17 @@ export function unsubscribeDb(cb: Listener) {
   listeners.delete(cb);
 }
 
-// ====== 日別キャッシュ ======
+// ====== 譌･蛻･繧ｭ繝｣繝・す繝･ ======
 const byDateCache = new Map<string, EventInstance[]>();
 function clearByDateCache() { byDateCache.clear(); }
 
-// 指定日のインスタンス列挙（ローカル日の 00:00〜23:59:59 に少しでもかかるもの）
+// 謖・ｮ壽律縺ｮ繧､繝ｳ繧ｹ繧ｿ繝ｳ繧ｹ蛻玲嫌・医Ο繝ｼ繧ｫ繝ｫ譌･縺ｮ 00:00縲・3:59:59 縺ｫ蟆代＠縺ｧ繧ゅ°縺九ｋ繧ゅ・・・
 export function listInstancesByDate(dateISO: string): EventInstance[] {
   const key = dayjs(dateISO).format('YYYY-MM-DD');
   const cached = byDateCache.get(key);
   if (cached) return cached;
 
-  // number(ms) に正規化してから比較
+  // number(ms) 縺ｫ豁｣隕丞喧縺励※縺九ｉ豈碑ｼ・
   const start = dayjs(startOfLocalDay(dateISO)).valueOf();
   const end   = dayjs(endOfLocalDay(dateISO)).valueOf();
 
@@ -91,30 +91,30 @@ export function listInstancesByDate(dateISO: string): EventInstance[] {
   return out;
 }
 
-// ====== CreateEventInput（UIからの入力型） ======
+// ====== CreateEventInput・・I縺九ｉ縺ｮ蜈･蜉帛梛・・======
 export type CreateEventInput = {
-  // 必須
+  // 蠢・・
   title: string;
-  start_at: string; // ISO（ローカルTZを含むフォーマットでOK）
+  start_at: string; // ISO・医Ο繝ｼ繧ｫ繝ｫTZ繧貞性繧繝輔か繝ｼ繝槭ャ繝医〒OK・・
   end_at: string;
 
-  // 任意
-  calendar_id?: string;      // 既定: 'CAL_LOCAL_DEFAULT'
-  summary?: string | null;   // descriptionは廃止。summaryで統一
-  // location / all_day はUI側で処理し、保存はしない
+  // 莉ｻ諢・
+  calendar_id?: string;      // 譌｢螳・ 'CAL_LOCAL_DEFAULT'
+  summary?: string | null;   // description縺ｯ蟒・ｭ｢縲Ｔummary縺ｧ邨ｱ荳
+  // location / all_day 縺ｯUI蛛ｴ縺ｧ蜃ｦ逅・＠縲∽ｿ晏ｭ倥・縺励↑縺・
   visibility?: Event['visibility'];
 
-  // UI拡張（永続化は tags のみ）
+  // UI諡｡蠑ｵ・域ｰｸ邯壼喧縺ｯ tags 縺ｮ縺ｿ・・
   color?: string;
   style?: { tags?: string[] };
-  // tz は UI 専用（Event 型に無いので保存しない）
+  // tz 縺ｯ UI 蟆ら畑・・vent 蝙九↓辟｡縺・・縺ｧ菫晏ｭ倥＠縺ｪ縺・ｼ・
   tz?: string;
 };
 
-// Event -> 既存UI互換の単一インスタンスへ展開
+// Event -> 譌｢蟄篭I莠呈鋤縺ｮ蜊倅ｸ繧､繝ｳ繧ｹ繧ｿ繝ｳ繧ｹ縺ｸ螻暮幕
 function eventToSingleInstance(ev: Event): EventInstance {
   return {
-    instance_id: Date.now(), // 簡易一意（同ms多重はごく稀）
+    instance_id: Date.now(), // 邁｡譏謎ｸ諢擾ｼ亥酔ms螟夐㍾縺ｯ縺斐￥遞・・
     calendar_id: ev.calendar_id,
     event_id: ev.event_id,
     title: ev.title,
@@ -123,7 +123,7 @@ function eventToSingleInstance(ev: Event): EventInstance {
   };
 }
 
-// 既存タグを更新して永続化
+// 譌｢蟄倥ち繧ｰ繧呈峩譁ｰ縺励※豌ｸ邯壼喧
 async function upsertTagsToStore(newTags: string[]) {
   if (!newTags?.length) return;
   newTags.forEach((t) => {
@@ -133,14 +133,14 @@ async function upsertTagsToStore(newTags: string[]) {
   try {
     const storeAny: any = await loadLocalStore();
     const nextTags = Array.from(tagsSet);
-    // 互換のため両方に書く（将来スキーマで正式化するまで）
+    // 莠呈鋤縺ｮ縺溘ａ荳｡譁ｹ縺ｫ譖ｸ縺擾ｼ亥ｰ・擂繧ｹ繧ｭ繝ｼ繝槭〒豁｣蠑丞喧縺吶ｋ縺ｾ縺ｧ・・
     storeAny.tags = nextTags;
     storeAny._tags = nextTags;
     await saveLocalStore(storeAny);
   } catch {}
 }
 
-// ====== 追加（ローカルDB＆ファイルへ） ======
+// ====== 霑ｽ蜉・医Ο繝ｼ繧ｫ繝ｫDB・・ヵ繧｡繧､繝ｫ縺ｸ・・======
 export async function createEventLocal(input: CreateEventInput): Promise<EventInstance> {
   const nowIso = new Date().toISOString();
 
@@ -152,21 +152,21 @@ export async function createEventLocal(input: CreateEventInput): Promise<EventIn
     start_at: input.start_at,
     end_at: input.end_at,
     visibility: input.visibility ?? 'private',
-    // tz / color / style は Event 型に無い可能性があるため保存しない
+    // tz / color / style 縺ｯ Event 蝙九↓辟｡縺・庄閭ｽ諤ｧ縺後≠繧九◆繧∽ｿ晏ｭ倥＠縺ｪ縺・
   };
 
   const inst = eventToSingleInstance(ev);
 
-  // メモリに反映
+  // 繝｡繝｢繝ｪ縺ｫ蜿肴丐
   instances = [...instances, inst];
   clearByDateCache();
   emitDbChanged();
 
-  // タグの永続化（style.tags のみ保存対象）
+  // 繧ｿ繧ｰ縺ｮ豌ｸ邯壼喧・・tyle.tags 縺ｮ縺ｿ菫晏ｭ伜ｯｾ雎｡・・
   const incomingTags = input.style?.tags ?? [];
   if (incomingTags.length) upsertTagsToStore(incomingTags);
 
-  // 非同期で永続化（フルスナップショット＋差分ログ）
+  // 髱槫酔譛溘〒豌ｸ邯壼喧・医ヵ繝ｫ繧ｹ繝翫ャ繝励す繝ｧ繝・ヨ・句ｷｮ蛻・Ο繧ｰ・・
   (async () => {
     try {
       const storeAny: any = await loadLocalStore();
@@ -176,7 +176,7 @@ export async function createEventLocal(input: CreateEventInput): Promise<EventIn
       if (i >= 0) storeAny.instances[i] = inst;
       else storeAny.instances.push(inst);
 
-      // 保険：同時に tags も反映
+      // 菫晞匱・壼酔譎ゅ↓ tags 繧ょ渚譏
       const currentTags: string[] = Array.isArray(storeAny.tags) ? storeAny.tags : [];
       const merged = new Set<string>(currentTags);
       incomingTags.forEach((t) => { const s = String(t).trim(); if (s) merged.add(s); });
@@ -193,14 +193,14 @@ export async function createEventLocal(input: CreateEventInput): Promise<EventIn
   return inst;
 }
 
-// ====== 同期などでインメモリを丸ごと差し替える ======
+// ====== 蜷梧悄縺ｪ縺ｩ縺ｧ繧､繝ｳ繝｡繝｢繝ｪ繧剃ｸｸ縺斐→蟾ｮ縺玲崛縺医ｋ ======
 export function replaceAllInstances(next: EventInstance[]) {
   instances = [...next];
   clearByDateCache();
   emitDbChanged();
 }
 
-// ====== 便利関数：全件取得・クリア（デバッグ用） ======
+// ====== 萓ｿ蛻ｩ髢｢謨ｰ・壼・莉ｶ蜿門ｾ励・繧ｯ繝ｪ繧｢・医ョ繝舌ャ繧ｰ逕ｨ・・======
 export function getAllInstances(): EventInstance[] {
   return [...instances];
 }
@@ -210,7 +210,7 @@ export function __clearAllInstancesForTest() {
   emitDbChanged();
 }
 
-// ====== 既存タグの取得 ======
+// ====== 譌｢蟄倥ち繧ｰ縺ｮ蜿門ｾ・======
 export function getAllTags(): string[] {
   return Array.from(tagsSet).sort((a, b) => a.localeCompare(b));
 }

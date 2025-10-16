@@ -1,9 +1,9 @@
-// src/screens/calendar/ProfileDrawer.tsx
+﻿// src/features/calendar/components/ProfileDrawer.tsx
 import React from 'react';
 import { Animated, Platform, Pressable, Text, View, StyleSheet } from 'react-native';
-import { PROFILE_ICON_SIZE, HAIR_SAFE, ProfileMenuRow } from '../CalendarParts';
-import { styles } from './calendarStyles';
-import { useAppTheme } from '../../theme';
+import { PROFILE_ICON_SIZE, HAIR_SAFE, ProfileMenuRow } from './CalendarParts';
+import { styles } from '../styles/calendarStyles';
+import { useAppTheme } from '../../../theme';
 
 type Props = {
   open: boolean;
@@ -17,20 +17,22 @@ export default function ProfileDrawer({ open, width, translateX, close, emoji }:
   const theme = useAppTheme();
   if (!open) return null;
 
-  // ライト/ダークで濃さを変える
+  // バックドロップ（背景）の色はテーマに合わせて調整
   const overlayBg = theme.mode === 'dark' ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.35)';
 
-  // アバターの面は app 背景を薄く使う（境界はテーマの border）
+  // アバター背景と枠線色
   const avatarBg = theme.mode === 'dark' ? '#0b1220' : '#f8fafc';
   const avatarBorder = theme.border;
 
   return (
     <View style={styles.layerWrap} pointerEvents="box-none">
+      {/* クリック（タップ）で閉じるバックドロップ */}
       <Pressable
         style={[styles.layerOverlay, { backgroundColor: overlayBg }]}
         onPress={close}
       />
 
+      {/* ドロワー本体（右側からスライドイン） */}
       <Animated.View
         style={[
           styles.profileDrawer,
@@ -80,7 +82,7 @@ export default function ProfileDrawer({ open, width, translateX, close, emoji }:
           </Text>
         </View>
 
-        {/* メニュー（本体） */}
+        {/* メニュー一覧 */}
         <View style={{ paddingVertical: 8 }}>
           <ProfileMenuRow icon="🔔" label="Notifications" />
           <ProfileMenuRow icon="⚙️" label="Settings" />
@@ -88,7 +90,7 @@ export default function ProfileDrawer({ open, width, translateX, close, emoji }:
           <ProfileMenuRow icon="❓" label="Help & Feedback" />
         </View>
 
-        {/* フッター（区切り線） */}
+        {/* フッター（サインアウトなど） */}
         <View
           style={[
             styles.profileFooter,

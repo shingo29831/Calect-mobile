@@ -1,9 +1,9 @@
-// src/screens/calendar/LeftDrawer.tsx
+﻿// src/features/calendar/components/LeftDrawer.tsx
 import React from 'react';
 import { Animated, Platform, Pressable, Text, View, StyleSheet } from 'react-native';
-import { DrawerRow, EntityItem } from '../CalendarParts';
-import { styles } from './calendarStyles';
-import { useAppTheme } from '../../theme';
+import { DrawerRow, EntityItem } from './CalendarParts';
+import { styles } from '../styles/calendarStyles';
+import { useAppTheme } from '../../../theme';
 
 type Props = {
   open: boolean;
@@ -35,15 +35,18 @@ export default function LeftDrawer({
   const theme = useAppTheme();
   if (!open) return null;
 
-  // オーバーレイはライト時やや薄め、ダーク時は少し濃く
+  // バックドロップ（背景）の色はテーマに合わせて濃さを調整
   const overlayBg = theme.mode === 'dark' ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.35)';
 
   return (
     <View style={styles.layerWrap} pointerEvents="box-none">
+      {/* クリック（タップ）で閉じるバックドロップ */}
       <Pressable
         style={[styles.layerOverlay, { backgroundColor: overlayBg }]}
         onPress={closeDrawer}
       />
+
+      {/* ドロワー本体 */}
       <Animated.View
         style={[
           styles.drawer,
@@ -58,7 +61,7 @@ export default function LeftDrawer({
           },
         ]}
       >
-        {/* Header */}
+        {/* ヘッダー */}
         <View
           style={[
             styles.drawerHeader,

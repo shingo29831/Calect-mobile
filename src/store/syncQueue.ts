@@ -1,7 +1,7 @@
-// src/store/syncQueue.ts
+﻿// src/store/syncQueue.ts
 import RNFS from 'react-native-fs';
 
-const QUEUE_FILE = `${RNFS.DocumentDirectoryPath}/appdata/events.queue.jsonl`; // 1行1イベントのNDJSON
+const QUEUE_FILE = `${RNFS.DocumentDirectoryPath}/appdata/events.queue.jsonl`; // 1陦・繧､繝吶Φ繝医・NDJSON
 const QUEUE_TMP  = `${RNFS.CachesDirectoryPath}/appdata/tmp/events.queue.jsonl.tmp`;
 
 type QueueItem =
@@ -11,7 +11,7 @@ type QueueItem =
 export async function appendQueue(item: QueueItem) {
   const line = JSON.stringify(item) + '\n';
   await ensureParent();
-  // 追記（アトミック度を上げたいなら tmp→concat→move）
+  // 霑ｽ險假ｼ医い繝医Α繝・け蠎ｦ繧剃ｸ翫￡縺溘＞縺ｪ繧・tmp竊団oncat竊知ove・・
   const exists = await RNFS.exists(QUEUE_FILE);
   if (!exists) {
     await RNFS.writeFile(QUEUE_FILE, line, 'utf8');

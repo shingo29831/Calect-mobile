@@ -1,4 +1,4 @@
-// src/components/CalendarIcon.tsx
+﻿// src/components/CalendarIcon.tsx
 import React from 'react';
 import { Image, View, Text } from 'react-native';
 import { HAIR_SAFE } from '../screens/CalendarParts';
@@ -7,10 +7,10 @@ import { getCalendarIconPath } from '../store/appData';
 type Props = {
   calendarId?: string | null;
   size?: number;        // px
-  fallbackEmoji?: string; // アイコン未設定時の絵文字
+  fallbackEmoji?: string; // 繧｢繧､繧ｳ繝ｳ譛ｪ險ｭ螳壽凾縺ｮ邨ｵ譁・ｭ・
 };
 
-export default function CalendarIcon({ calendarId, size = 18, fallbackEmoji = '📅' }: Props) {
+export default function CalendarIcon({ calendarId, size = 18, fallbackEmoji = '套' }: Props) {
   const uri = getCalendarIconPath(calendarId);
   const radius = Math.floor(size / 2);
 

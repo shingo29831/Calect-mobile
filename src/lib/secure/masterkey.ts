@@ -1,14 +1,14 @@
-// src/lib/secure/masterkey.ts
+﻿// src/lib/secure/masterkey.ts
 import { NativeModules } from 'react-native';
 
-// 必要なら安全な乱数の Polyfill を読み込む（未導入でも動作はするが、
-// secure RNG が無い環境では例外を投げます）
+// 蠢・ｦ√↑繧牙ｮ牙・縺ｪ荵ｱ謨ｰ縺ｮ Polyfill 繧定ｪｭ縺ｿ霎ｼ繧・域悴蟆主・縺ｧ繧ょ虚菴懊・縺吶ｋ縺後・
+// secure RNG 縺檎┌縺・腸蠅・〒縺ｯ萓句､悶ｒ謚輔￡縺ｾ縺呻ｼ・
 try {
   // npm i react-native-get-random-values
   require('react-native-get-random-values');
 } catch { /* noop */ }
 
-// NativeModules の型（あなたの iOS/Android 実装に合わせて Base64 を受け渡し）
+// NativeModules 縺ｮ蝙具ｼ医≠縺ｪ縺溘・ iOS/Android 螳溯｣・↓蜷医ｏ縺帙※ Base64 繧貞女縺第ｸ｡縺暦ｼ・
 type SecureStoreNative = {
   setItem(service: string, account: string, valueB64: string): Promise<void>;
   getItem(service: string, account: string): Promise<string | null>;
@@ -19,7 +19,7 @@ const { SecureStore } = NativeModules as { SecureStore: SecureStoreNative };
 const SERVICE = 'calect.masterKey.v1';
 const ACCOUNT = 'default';
 
-// ---- Base64 ユーティリティ（base-64 パッケージを使用） ----
+// ---- Base64 繝ｦ繝ｼ繝・ぅ繝ｪ繝・ぅ・・ase-64 繝代ャ繧ｱ繝ｼ繧ｸ繧剃ｽｿ逕ｨ・・----
 function toB64(u8: Uint8Array): string {
   const { encode } = require('base-64');
   let s = '';
@@ -34,7 +34,7 @@ function fromB64(b64: string): Uint8Array {
   return out;
 }
 
-// ---- 32byte のランダム鍵を生成（secure RNG 必須）----
+// ---- 32byte 縺ｮ繝ｩ繝ｳ繝繝骰ｵ繧堤函謌撰ｼ・ecure RNG 蠢・茨ｼ・---
 function randomBytes(len: number): Uint8Array {
   const g: any = globalThis as any;
   if (g?.crypto?.getRandomValues) {
@@ -42,23 +42,23 @@ function randomBytes(len: number): Uint8Array {
     g.crypto.getRandomValues(a);
     return a;
   }
-  // secure RNG が無い環境は拒否（Math.random は使わない）
+  // secure RNG 縺檎┌縺・腸蠅・・諡貞凄・・ath.random 縺ｯ菴ｿ繧上↑縺・ｼ・
   throw new Error(
     'Secure RNG unavailable. Install "react-native-get-random-values" and import it at app entry.'
   );
 }
 
-/** 既存のマスターキーを取得。無ければ 32byte を生成して保存（Base64） */
+/** 譌｢蟄倥・繝槭せ繧ｿ繝ｼ繧ｭ繝ｼ繧貞叙蠕励ら┌縺代ｌ縺ｰ 32byte 繧堤函謌舌＠縺ｦ菫晏ｭ假ｼ・ase64・・*/
 export async function loadOrCreateMasterKey(): Promise<Uint8Array> {
   const existingB64 = await SecureStore.getItem(SERVICE, ACCOUNT);
   if (existingB64) return fromB64(existingB64);
 
-  const key = randomBytes(32); // AES-256 等に使える長さ
+  const key = randomBytes(32); // AES-256 遲峨↓菴ｿ縺医ｋ髟ｷ縺・
   await SecureStore.setItem(SERVICE, ACCOUNT, toB64(key));
   return key;
 }
 
-/** 明示的にローテーションしたい場合 */
+/** 譏守､ｺ逧・↓繝ｭ繝ｼ繝・・繧ｷ繝ｧ繝ｳ縺励◆縺・ｴ蜷・*/
 export async function rotateMasterKey(): Promise<Uint8Array> {
   const key = randomBytes(32);
   await SecureStore.setItem(SERVICE, ACCOUNT, toB64(key));

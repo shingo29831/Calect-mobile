@@ -1,4 +1,4 @@
-// src/screens/CalendarParts.tsx
+﻿// src/features/calendar/components/CalendarParts.tsx
 import React from 'react';
 import {
   View,
@@ -9,8 +9,8 @@ import {
   PixelRatio,
 } from 'react-native';
 import type { DateData } from 'react-native-calendars';
-import dayjs from '../lib/dayjs';
-import { useAppTheme } from '../theme';
+import dayjs from '../../../lib/dayjs';
+import { useAppTheme } from '../../../theme';
 
 /* ===== 画面サイズ・線幅など ===== */
 export const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
@@ -31,35 +31,34 @@ export const IS_SMALL_SCREEN = SCREEN_H < 700;
 export const DAY_FONT = IS_SMALL_SCREEN ? 18 : 20;
 export const HEADER_FONT = IS_SMALL_SCREEN ? 12 : 13;
 
-/* ===== レイアウト（固定値） ===== */
+/* ===== レイアウト定数 ===== */
 export const HEADER_HEIGHT = 36;
 export const MONTH_TITLE_HEIGHT = 44;
 export const ROWS = 6; // showSixWeeks=true
 export const FIRST_DAY = 0;
-// 互換用：選択時の薄い背景（実際には Theme の accent を使って計算）
+// 選択日の背景（実描画は Theme の accent を元に計算）
 export const SELECTED_BG = 'rgba(96,165,250,0.14)';
 export const SIDE_PAD = 8;
 export const SEP_H = LINE_W;
 
-/* ===== イベント横バー表示の定数 ===== */
+/* ===== イベントバー表示用定数 ===== */
 export const MAX_BARS_PER_DAY = 4;
 export const EVENT_BAR_H = 16;
 export const EVENT_BAR_GAP = 4;
 export const EVENT_BAR_RADIUS = 6;
 export const EVENT_TEXT_SIZE = 11;
-// 互換用デフォルト
 export const DEFAULT_EVENT_COLOR = '#60a5fa';
 export const DEFAULT_EVENT_BG = 'rgba(37, 99, 235, 0.12)';
 export const BAR_INSET = 4;
 
-/* ===== 左/右ドロワーのUI寸法 ===== */
+/* ===== Drawer / Profile のUI用 ===== */
 export const DRAWER_ICON = 36;
 export const PROFILE_ICON_SIZE = 28;
 
-/* ===== 表示用の固定タイムゾーン（db と合わせる） ===== */
+/* ===== 表示TZ ===== */
 export const DISPLAY_TZ = 'Asia/Tokyo';
 
-/* ===== エンティティ／イベント型 ===== */
+/* ===== 型 ===== */
 export type EntityItem = {
   id: string;
   label: string;
@@ -77,7 +76,7 @@ export type EventSegment = {
   __spacer?: boolean;
 };
 
-/* ===== ユーティリティ ===== */
+/* ===== ヘルパー ===== */
 export function startOfWeek(d: dayjs.Dayjs, firstDay: number) {
   const wd = d.day();
   const diff = (wd - firstDay + 7) % 7;
@@ -93,7 +92,7 @@ export function getMonthRangeDates(yyyymm: string) {
   return days;
 }
 
-/* ===== 小さな UI コンポーネント群 ===== */
+/* ===== UI: 週ヘッダ ===== */
 export function WeekHeader({ colWBase, colWLast }: { colWBase: number; colWLast: number }) {
   const theme = useAppTheme();
   const raw = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -128,6 +127,7 @@ export function WeekHeader({ colWBase, colWLast }: { colWBase: number; colWLast:
   );
 }
 
+/* ===== UI: 日セル ===== */
 export const DayCell = React.memo(function DayCell({
   date,
   state,
@@ -162,7 +162,6 @@ export const DayCell = React.memo(function DayCell({
 
   const colIndex = (wd - FIRST_DAY + 7) % 7;
 
-  // 配色は Theme に従う
   const dayColor = isDisabled
     ? theme.dayDisabled
     : wd === 0
@@ -175,12 +174,9 @@ export const DayCell = React.memo(function DayCell({
   const colW = isLast ? colWLast : colWBase;
 
   const barsTop = 6 + (DAY_FONT + 2) + 6;
-  // 選択背景：accent を少し透明に
-  const cellBg = isSelected ? `${theme.accent}24` /* ~0.14 */ : 'transparent';
+  const cellBg = isSelected ? `${theme.accent}24` : 'transparent';
 
-  // 画面に表示するスロット（上限内）
   const visibleSlots = dayEvents.slice(0, MAX_BARS_PER_DAY);
-  // moreCount が未指定なら自動計算
   const computedMore = moreCount > 0 ? moreCount : Math.max(0, dayEvents.length - MAX_BARS_PER_DAY);
 
   return (
@@ -197,7 +193,7 @@ export const DayCell = React.memo(function DayCell({
       android_ripple={{ color: `${theme.accent}2E` }}
       hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
     >
-      {/* 下罫線（常に最前面） */}
+      {/* 下罫線 */}
       <View
         pointerEvents="none"
         style={{
@@ -211,7 +207,7 @@ export const DayCell = React.memo(function DayCell({
         }}
       />
 
-      {/* 右縦罫線（最前面） */}
+      {/* 右罫線 */}
       {!isLast && !hideRightDivider && (
         <View
           pointerEvents="none"
@@ -227,7 +223,7 @@ export const DayCell = React.memo(function DayCell({
         />
       )}
 
-      {/* マスク（縦罫線を隠す指定がある場合のみ） */}
+      {/* 右罫線を消したいときの上書き */}
       {!isLast && hideRightDivider && (
         <View
           pointerEvents="none"
@@ -263,7 +259,7 @@ export const DayCell = React.memo(function DayCell({
           }
 
           const baseColor = ev.color || theme.eventDefaultFg;
-          const bg = `${baseColor}22`; // 薄い背景
+          const bg = `${baseColor}22`;
           const borderColor = baseColor;
 
           const radiusLeft = ev.spanLeft ? 0 : EVENT_BAR_RADIUS;
@@ -271,9 +267,8 @@ export const DayCell = React.memo(function DayCell({
           const left = ev.spanLeft ? 0 : BAR_INSET;
           const right = ev.spanRight ? 0 : BAR_INSET;
 
-          // ★ ここがポイント：タイトルは常に表示（未指定時は (無題)）
           const willShowTitle = ev.showTitle ?? true;
-          const titleText = (ev.title?.trim?.() || ev.title || '').toString().trim() || '(無題)';
+          const titleText = (ev.title?.trim?.() || ev.title || '').toString().trim() || '(no title)';
 
           return (
             <View
@@ -309,7 +304,7 @@ export const DayCell = React.memo(function DayCell({
           );
         })}
 
-        {/* はみ出しがある場合の more バー（+N件 と表示） */}
+        {/* more 表示 */}
         {computedMore > 0 && (
           <View
             style={{
@@ -330,7 +325,7 @@ export const DayCell = React.memo(function DayCell({
               numberOfLines={1}
               style={{ fontSize: EVENT_TEXT_SIZE, color: theme.textSecondary, fontWeight: '600' }}
             >
-              +{computedMore}件
+              +{computedMore}
             </Text>
           </View>
         )}
@@ -339,7 +334,7 @@ export const DayCell = React.memo(function DayCell({
   );
 });
 
-/* ===== リスト用行など（テーマ対応）===== */
+/* ===== Drawer / Profile 共通の行 ===== */
 export function DrawerRow({
   item,
   active,
@@ -394,7 +389,7 @@ export function DrawerRow({
 
       {chevron ? (
         <Text style={[styles.chevron, { color: theme.textSecondary }]}>
-          {chevron === 'down' ? '▾' : '▸'}
+          {chevron === 'down' ? '▼' : '▶'}
         </Text>
       ) : (
         <View style={{ width: 16 }} />
@@ -413,7 +408,7 @@ export function ProfileMenuRow({ icon, label, onPress }: { icon: string; label: 
   );
 }
 
-/* ===== このファイル内のスタイル（小コンポーネント用） ===== */
+/* ===== Styles ===== */
 const styles = StyleSheet.create({
   dayCell: {
     position: 'relative',

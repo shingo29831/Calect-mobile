@@ -1,30 +1,30 @@
-// src/screens/calendar/hooks/useMonthEvents.ts
+﻿// src/features/calendar/hooks/useMonthEvents.ts
 import { useMemo } from 'react';
 import dayjs from '../../../lib/dayjs';
 import type { EventInstance } from '../../../api/types';
 import { listInstancesByDate } from '../../../store/db';
-import { MAX_BARS_PER_DAY } from '../../CalendarParts';
+import { MAX_BARS_PER_DAY } from '../components/CalendarParts';
 
 type SortMode = 'span' | 'start';
 
-/** DayCell に渡す最小セグメント型（DayCell 側の期待に合わせる） */
+/** DayCell で使うイベント片（横バー1本分） */
 export type EventSegment = EventInstance & {
-  spanLeft: boolean;
-  spanRight: boolean;
+  spanLeft: boolean;   // 前日にまたがっているなら左を角丸にしない
+  spanRight: boolean;  // 翌日にまたがっているなら右を角丸にしない
 };
 
-/** 重複判定用キー（タイトル+時刻+カレンダ） */
+/** 「同一」とみなすための簡易キー（暫定） */
 const keyOf = (ev: EventInstance) =>
   `${String(ev.calendar_id ?? '')}|${String(ev.title ?? '')}|${String(ev.start_at ?? '')}|${String(ev.end_at ?? '')}`;
 
-/** 同一日内のソート関数 */
+/** 並び順を作る（開始時刻 or 所要時間の長い順） */
 function makeSorter(sortMode: SortMode) {
   if (sortMode === 'start') {
     return (a: EventInstance, b: EventInstance) =>
       dayjs(a.start_at).valueOf() - dayjs(b.start_at).valueOf() ||
       (a.title || '').localeCompare(b.title || '');
   }
-  // 'span'：長いもの優先 → 同時刻なら開始時刻→タイトル
+  // 'span'：長いイベント優先 → 同時刻なら開始が早い方 → それでも同じならタイトル
   return (a: EventInstance, b: EventInstance) => {
     const spanA = dayjs(a.end_at).diff(dayjs(a.start_at), 'minute');
     const spanB = dayjs(b.end_at).diff(dayjs(b.start_at), 'minute');
@@ -36,9 +36,9 @@ function makeSorter(sortMode: SortMode) {
   };
 }
 
-/** 縦方向のレーンに詰める（単純な貪欲法） */
+/** 同一日のイベントを「重ならないように」縦レーンへ割り付ける */
 function layoutIntoLanes(rows: EventInstance[], maxBars = MAX_BARS_PER_DAY): EventSegment[] {
-  // レーンごとに最後に置いたイベントの終了時刻（ms）
+  // 各レーンの「最後の終了時刻」を保持して、重ならないレーンへ置く
   const laneEnd: number[] = [];
   const placed: Array<EventSegment & { __lane: number }> = [];
 
@@ -46,7 +46,7 @@ function layoutIntoLanes(rows: EventInstance[], maxBars = MAX_BARS_PER_DAY): Eve
     const s = dayjs(ev.start_at).valueOf();
     const e = dayjs(ev.end_at).valueOf();
 
-    // 既存レーンに置けるかチェック
+    // 入れられる最初のレーンを探す
     let lane = -1;
     for (let i = 0; i < laneEnd.length; i++) {
       if (s >= laneEnd[i]) { lane = i; break; }
@@ -65,20 +65,21 @@ function layoutIntoLanes(rows: EventInstance[], maxBars = MAX_BARS_PER_DAY): Eve
     });
   }
 
-  // レーン順→最大数まで切り出し
+  // レーン順に並べ替え、表示上限に切り詰め
   placed.sort((a, b) => a.__lane - b.__lane);
   const limited = placed.slice(0, maxBars);
-  // ダミーの spanLeft/Right は false のまま（複数日にまたがるバーを中央で切らない前提）
+
+  // spanLeft/Right はここでは false（実際の表示側でまたぎ判定をする場合は更新）
   return limited.map(({ __lane, ...seg }) => seg);
 }
 
 /**
- * 月カレンダー用：日付配列に対して、日別 EventSegment[] と overflow 件数を返す
+ * 月表示用：各日付に EventSegment[] を割り付け、さらに溢れ件数（more）も返す
  *
- * @param monthDates YYYY-MM-DD[]（CalendarList が表示する月の全日）
- * @param filterEventsByEntity 絞り込み（選択中のOrg/Groupなど）
- * @param sortMode 'span'（長い順）か 'start'（開始時刻順）
- * @param refreshKey 変更すると再計算を強制（イベント作成直後の反映用・任意）
+ * @param monthDates YYYY-MM-DD[]（CalendarList で表示する 6×7=42 日など）
+ * @param filterEventsByEntity 表示対象の Org/Group/ユーザーなどでフィルタ
+ * @param sortMode 'span' | 'start'
+ * @param refreshKey 依存に含めたい任意キー（外部更新トリガ用）
  */
 export function useMonthEvents(
   monthDates: string[],
@@ -97,10 +98,10 @@ export function useMonthEvents(
     const sorter = makeSorter(sortMode);
 
     for (const d of monthDates) {
-      // 1) DB から該当日のインスタンスを同期取得
+      // 1) DB からその日のイベントを取得
       const raw: EventInstance[] = listInstancesByDate(d) ?? [];
 
-      // 2) エンティティで絞り込み → 重複除去
+      // 2) 表示対象でフィルタ → 簡易重複排除
       const filtered = filterEventsByEntity(raw);
       const uniq: EventInstance[] = [];
       const seen = new Set<string>();
@@ -109,7 +110,7 @@ export function useMonthEvents(
         if (!seen.has(k)) { seen.add(k); uniq.push(ev); }
       }
 
-      // 3) ソート → レーン詰め（MAX_BARS_PER_DAY まで表示）
+      // 3) 並べ替え → レーン割付（MAX_BARS_PER_DAY に収める）
       const sorted = uniq.sort(sorter);
       const laid = layoutIntoLanes(sorted, MAX_BARS_PER_DAY);
 
@@ -118,7 +119,7 @@ export function useMonthEvents(
     }
 
     return { eventsByDate, overflowByDate };
-    // monthDates/filter/sortMode に加えて refreshKey を依存に含めるのがミソ
+    // monthDates/filter/sortMode に反応しつつ、refreshKey も変更で再計算
   }, [monthDates, filterEventsByEntity, sortMode, refreshKey]);
 }
 
