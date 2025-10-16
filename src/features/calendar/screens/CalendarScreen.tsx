@@ -1,5 +1,5 @@
 ﻿// src/screens/CalendarScreen.tsx
-import React, { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue, memo } from 'react';
 import {
   View, Text, Pressable, Platform, TextInput, KeyboardAvoidingView, Animated,
   Image, StyleSheet, Switch, PanResponder, GestureResponderEvent, PanResponderGestureState, ScrollView
@@ -77,6 +77,252 @@ async function loadAppData(): Promise<{ server?: ServerDocV2; prefs?: ClientPref
   }
 }
 
+/** ==================
+ *  HourDial: 二重リング (内側 0-11, 外側 12-23)
+ *  - 角度は中央を基準に「上=0°、時計回り」
+ *  - 押下/ドラッグ中に onChange、離したとき onConfirm
+ *  ================== */
+type HourDialProps = {
+  size?: number;
+  innerRatio?: number;     // 内側リングの半径比 (外径に対して)
+  outerRatio?: number;     // 外側リングの半径比 (外径に対して)
+  thresholdRatio?: number; // 内外判定の閾値 (半径比)
+  value?: number | null;   // 0-23
+  onChange: (hour: number) => void;
+  onConfirm: (hour: number) => void;
+  selectedColor?: string;
+  textColor?: string;
+};
+const HourDial: React.FC<HourDialProps> = memo(({
+  size = 380,
+  innerRatio = 0.50,
+  outerRatio = 0.78,
+  thresholdRatio = 0.64,
+  value = null,
+  onChange,
+  onConfirm,
+  selectedColor = '#2563eb',
+  textColor = '#111',
+}) => {
+  const radius = size / 2;
+  const itemsInner = Array.from({ length: 12 }, (_, h) => h);       // 0..11
+  const itemsOuter = Array.from({ length: 12 }, (_, i) => i + 12);  // 12..23
+
+  const pickFromXY = useCallback((x: number, y: number) => {
+    // 中心基準に変換
+    const dx = x - radius;
+    const dy = y - radius;
+    // 角度: 上=0°, 時計回り (+90°の代わりに -90°基準を補正)
+    let ang = Math.atan2(dy, dx); // -pi..pi (右=0°、上= -90°)
+    ang = ang + Math.PI / 2;      // 上を 0° に
+    if (ang < 0) ang += Math.PI * 2; // 0..2pi
+    const deg = (ang * 180) / Math.PI; // 0..360
+
+    // 半径比で内外を判定
+    const r = Math.sqrt(dx * dx + dy * dy);
+    const ratio = r / radius;
+    const isOuter = ratio >= thresholdRatio;
+
+    // 度数から 12刻みのインデックスを取得（上=0°、時計回り）
+    // 角度0°を「12時位置」とみなし、インデックスは 0..11
+    const index = Math.round((deg / 360) * 12) % 12;
+    const hour = isOuter ? (12 + index) % 24 : index;
+    return hour;
+  }, [radius, thresholdRatio]);
+
+  const handleMove = useCallback((evt: any) => {
+    const { locationX, locationY } = evt.nativeEvent;
+    const h = pickFromXY(locationX, locationY);
+    onChange(h);
+  }, [pickFromXY, onChange]);
+
+  const handleRelease = useCallback((evt: any) => {
+    const { locationX, locationY } = evt.nativeEvent;
+    const h = pickFromXY(locationX, locationY);
+    onConfirm(h);
+  }, [pickFromXY, onConfirm]);
+
+  const ring = (items: number[], ringRatio: number) => (
+    <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} pointerEvents="none">
+      {items.map((h) => {
+        const idx = h % 12; // 0..11
+        const angle = ((idx / 12) * 360 - 90) * (Math.PI / 180);
+        const r = radius * ringRatio;
+        const x = radius + r * Math.cos(angle);
+        const y = radius + r * Math.sin(angle);
+        const selected = value === h;
+        return (
+          <View
+            key={h}
+            style={{
+              position: 'absolute',
+              left: x - 24,
+              top:  y - 24,
+              width: 48,
+              height: 48,
+              borderRadius: 24,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: selected ? selectedColor : 'transparent',
+            }}
+          >
+            <Text style={{ fontWeight: '800', fontSize: 16, color: selected ? '#fff' : textColor }}>{h}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: radius,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+      onStartShouldSetResponder={() => true}
+      onMoveShouldSetResponder={() => true}
+      onResponderGrant={handleMove}
+      onResponderMove={handleMove}
+      onResponderRelease={handleRelease}
+      onResponderTerminate={handleRelease}
+    >
+      {/* Outer and Inner Rings */}
+      {ring(itemsOuter, outerRatio)}
+      {ring(itemsInner, innerRatio)}
+
+      {/* 中央表示 */}
+      <View
+        style={{
+          width: radius * 0.9,
+          height: radius * 0.9,
+          borderRadius: (radius * 0.9) / 2,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+        pointerEvents="none"
+      >
+        <Text style={{ fontSize: 28, fontWeight: '900', color: textColor }}>{value ?? '--'}:00</Text>
+      </View>
+    </View>
+  );
+});
+
+/** ==================
+ *  MinuteDial: 0-59 の単一リング
+ *  - 角度は中央基準（上=0°、時計回り）
+ *  - 主要ラベルは 5分刻みで表示
+ *  ================== */
+type MinuteDialProps = {
+  size?: number;
+  ringRatio?: number;
+  value?: number | null; // 0..59
+  onChange: (min: number) => void;
+  onConfirm: (min: number) => void;
+  selectedColor?: string;
+  textColor?: string;
+};
+const MinuteDial: React.FC<MinuteDialProps> = memo(({
+  size = 380,
+  ringRatio = 0.78,
+  value = null,
+  onChange,
+  onConfirm,
+  selectedColor = '#2563eb',
+  textColor = '#111',
+}) => {
+  const radius = size / 2;
+
+  const pickFromXY = useCallback((x: number, y: number) => {
+    const dx = x - radius;
+    const dy = y - radius;
+    let ang = Math.atan2(dy, dx);
+    ang = ang + Math.PI / 2;
+    if (ang < 0) ang += Math.PI * 2;
+    const minFloat = (ang / (Math.PI * 2)) * 60;
+    const m = Math.round(minFloat) % 60;
+    return m;
+  }, [radius]);
+
+  const handleMove = useCallback((evt: any) => {
+    const { locationX, locationY } = evt.nativeEvent;
+    const m = pickFromXY(locationX, locationY);
+    onChange(m);
+  }, [pickFromXY, onChange]);
+
+  const handleRelease = useCallback((evt: any) => {
+    const { locationX, locationY } = evt.nativeEvent;
+    const m = pickFromXY(locationX, locationY);
+    onConfirm(m);
+  }, [pickFromXY, onConfirm]);
+
+  const items = Array.from({ length: 60 }, (_, i) => i);
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: radius,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+      onStartShouldSetResponder={() => true}
+      onMoveShouldSetResponder={() => true}
+      onResponderGrant={handleMove}
+      onResponderMove={handleMove}
+      onResponderRelease={handleRelease}
+      onResponderTerminate={handleRelease}
+    >
+      <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} pointerEvents="none">
+        {items.map((m) => {
+          const angle = ((m / 60) * 360 - 90) * (Math.PI / 180);
+          const r = radius * ringRatio;
+          const x = radius + r * Math.cos(angle);
+          const y = radius + r * Math.sin(angle);
+          const showLabel = m % 5 === 0;
+          const selected = value === m;
+          return (
+            <View
+              key={m}
+              style={{
+                position: 'absolute',
+                left: x - (showLabel ? 22 : 6),
+                top: y - (showLabel ? 22 : 6),
+                width: showLabel ? 44 : 12,
+                height: showLabel ? 44 : 12,
+                borderRadius: showLabel ? 22 : 6,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: selected ? selectedColor : 'transparent',
+              }}
+            >
+              {showLabel ? (
+                <Text style={{ fontWeight: '800', fontSize: 14, color: selected ? '#fff' : textColor }}>{m}</Text>
+              ) : (
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: selected ? '#fff' : textColor, opacity: 0.35 }} />
+              )}
+            </View>
+          );
+        })}
+      </View>
+      <View
+        style={{
+          width: radius * 0.9,
+          height: radius * 0.9,
+          borderRadius: (radius * 0.9) / 2,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+        pointerEvents="none"
+      >
+        <Text style={{ fontSize: 28, fontWeight: '900', color: textColor }}>{value ?? '--'}分</Text>
+      </View>
+    </View>
+  );
+});
+
 // ===== フォールバック定数（絵文字の文字化けを修正）=====
 const ORGS_FALLBACK: EntityItem[] = [
   { id: 'org_me',   label: 'My Schedule', emoji: '🗓️', kind: 'me' },
@@ -88,7 +334,7 @@ const GROUPS_BY_ORG_FALLBACK: Record<string, EntityItem[]> = {
   org_me:  [ { id: 'grp_me_private', label: 'Private', emoji: '🔒', kind: 'group' } ],
   org_fam: [
     { id: 'grp_fam_all',     label: 'All Members', emoji: '👨‍👩‍👧‍👦', kind: 'group' },
-    { id: 'grp_fam_parents', label: 'Parents',     emoji: '🧑‍🧒', kind: 'group' },
+    { id: 'grp_fam_parents', label: 'Parents',     emoji: '🧑‍🦰', kind: 'group' },
   ],
   org_team: [
     { id: 'grp_team_all', label: 'All Hands', emoji: '🙌', kind: 'group' },
@@ -328,6 +574,18 @@ export default function CalendarScreen({ navigation }: Props) {
 
   const [startCalOpen, setStartCalOpen] = useState(false);
   const [endCalOpen, setEndCalOpen]     = useState(false);
+
+  // 時刻オーバーレイ用
+  const [startTimeOpen, setStartTimeOpen] = useState(false);
+  const [endTimeOpen, setEndTimeOpen] = useState(false);
+  const [startHour, setStartHour] = useState<number | null>(10);
+  const [endHour, setEndHour] = useState<number | null>(11);
+
+  // 分ダイヤル
+  const [startMinuteOpen, setStartMinuteOpen] = useState(false);
+  const [endMinuteOpen, setEndMinuteOpen] = useState(false);
+  const [startMinute, setStartMinute] = useState<number | null>(0);
+  const [endMinute, setEndMinute] = useState<number | null>(0);
 
   const DEFAULT_CAL_ID = 'CAL_LOCAL_DEFAULT';
   const [formCalId, setFormCalId] = useState<string>(DEFAULT_CAL_ID);
@@ -637,6 +895,16 @@ export default function CalendarScreen({ navigation }: Props) {
     if (v) { setStartTime('00:00'); setEndTime('23:59'); }
   }, []);
 
+  // 時間→文字列適用
+  const applyHourToStartTime = useCallback((h: number) => {
+    const hh = String(Math.max(0, Math.min(23, h))).padStart(2, '0');
+    setStartTime(`${hh}:${String(startMinute ?? 0).padStart(2,'0')}`);
+  }, [startMinute]);
+  const applyHourToEndTime = useCallback((h: number) => {
+    const hh = String(Math.max(0, Math.min(23, h))).padStart(2, '0');
+    setEndTime(`${hh}:${String(endMinute ?? 0).padStart(2,'0')}`);
+  }, [endMinute]);
+
   return (
     <View style={[styles.container, { backgroundColor: bgColor }]}>
       {/* 背景画像 & スクリーン */}
@@ -786,6 +1054,10 @@ export default function CalendarScreen({ navigation }: Props) {
           setEndDate(selected);
           setStartTime('10:00');
           setEndTime('11:00');
+          setStartHour(10);
+          setEndHour(11);
+          setStartMinute(0);
+          setEndMinute(0);
           setFormCalId(DEFAULT_CAL_ID);
 
           setAddVisible(true);
@@ -950,43 +1222,47 @@ export default function CalendarScreen({ navigation }: Props) {
                   </View>
                   {!formAllDay && (
                     <View style={{ flexDirection: 'row', gap: 12 }}>
-                      <View style={{ flex: 1 }}>
+                      {/* 開始時刻（タップで時計オーバーレイ） */}
+                      <Pressable
+                        onPress={() => {
+                          setStartTimeOpen(true);
+                          const mm = String(startTime || '').match(/^(\d{1,2}):(\d{1,2})$/);
+                          const h = mm ? Math.max(0, Math.min(23, parseInt(mm[1],10))) : 0;
+                          const m = mm ? Math.max(0, Math.min(59, parseInt(mm[2],10))) : 0;
+                          setStartHour(h);
+                          setStartMinute(m);
+                        }}
+                        style={{
+                          flex: 1, borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                          paddingHorizontal: 12, paddingVertical: 10, backgroundColor: theme.appBg
+                        }}
+                      >
                         <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>
-                          Start time (HH:mm)
+                          Start time (tap to select)
                         </Text>
-                        <TextInput
-                          value={startTime}
-                          onChangeText={setStartTime}
-                          placeholder="10:00"
-                          keyboardType="numbers-and-punctuation"
-                          placeholderTextColor={theme.textSecondary}
-                          selectionColor={theme.accent}
-                          style={{
-                            borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
-                            paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
-                            color: theme.textPrimary, backgroundColor: theme.appBg,
-                          }}
-                        />
-                      </View>
+                        <Text style={{ fontSize: 16, color: theme.textPrimary, fontWeight: '700' }}>{startTime}</Text>
+                      </Pressable>
 
-                      <View style={{ flex: 1 }}>
+                      {/* 終了時刻（タップで時計オーバーレイ） */}
+                      <Pressable
+                        onPress={() => {
+                          setEndTimeOpen(true);
+                          const mm = String(endTime || '').match(/^(\d{1,2}):(\d{1,2})$/);
+                          const h = mm ? Math.max(0, Math.min(23, parseInt(mm[1],10))) : 0;
+                          const m = mm ? Math.max(0, Math.min(59, parseInt(mm[2],10))) : 0;
+                          setEndHour(h);
+                          setEndMinute(m);
+                        }}
+                        style={{
+                          flex: 1, borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                          paddingHorizontal: 12, paddingVertical: 10, backgroundColor: theme.appBg
+                        }}
+                      >
                         <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>
-                          End time (HH:mm)
+                          End time (tap to select)
                         </Text>
-                        <TextInput
-                          value={endTime}
-                          onChangeText={setEndTime}
-                          placeholder="11:00"
-                          keyboardType="numbers-and-punctuation"
-                          placeholderTextColor={theme.textSecondary}
-                          selectionColor={theme.accent}
-                          style={{
-                            borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
-                            paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, marginBottom: 12,
-                            color: theme.textPrimary, backgroundColor: theme.appBg,
-                          }}
-                        />
-                      </View>
+                        <Text style={{ fontSize: 16, color: theme.textPrimary, fontWeight: '700' }}>{endTime}</Text>
+                      </Pressable>
                     </View>
                   )}
 
@@ -1134,6 +1410,207 @@ export default function CalendarScreen({ navigation }: Props) {
               </View>
             </Animated.View>
           </KeyboardAvoidingView>
+        </View>
+      )}
+
+      {/* ====== MiniCalendar Overlay ====== */}
+      {addVisible && (startCalOpen || endCalOpen) && (
+        <View
+          pointerEvents="box-none"
+          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 20000 }}
+        >
+          {/* 背景タップで閉じる */}
+          <Pressable
+            onPress={() => { setStartCalOpen(false); setEndCalOpen(false); }}
+            style={StyleSheet.absoluteFillObject}
+          >
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }} />
+          </Pressable>
+
+          {/* 画面上部寄せ */}
+          <View
+            style={{
+              position: 'absolute',
+              top: Math.floor(SCREEN_H * 0.25),
+              alignSelf: 'center',
+              width: Math.min(360, SCREEN_W - 24),
+              borderRadius: 12,
+              backgroundColor: theme.surface,
+              borderWidth: HAIR_SAFE,
+              borderColor: theme.border,
+              shadowColor: '#000',
+              shadowOpacity: 0.2,
+              shadowRadius: 12,
+              shadowOffset: { width: 0, height: 6 },
+              overflow: 'hidden',
+            }}
+          >
+            <MiniCalendar
+              firstDay={FIRST_DAY}
+              current={startCalOpen ? startDate : endDate}
+              markedDates={{
+                [startCalOpen ? startDate : endDate]: { selected: true },
+              }}
+              onDayPress={(d: DateData) => {
+                if (startCalOpen) setStartDate(d.dateString);
+                else setEndDate(d.dateString);
+                setStartCalOpen(false);
+                setEndCalOpen(false);
+              }}
+              theme={{
+                backgroundColor: theme.surface,
+                calendarBackground: theme.surface,
+                textDayFontWeight: '700',
+                textDayFontSize: 16,
+                textMonthFontSize: 16,
+                textMonthFontWeight: '800',
+                dayTextColor: theme.textPrimary,
+                monthTextColor: theme.textPrimary,
+                todayTextColor: theme.accent,
+                selectedDayBackgroundColor: theme.accent,
+                selectedDayTextColor: theme.accentText,
+              }}
+            />
+          </View>
+        </View>
+      )}
+
+      {/* ====== Time Picker Overlays ====== */}
+      {/* Hour */}
+      {addVisible && (startTimeOpen || endTimeOpen) && !formAllDay && (
+        <View
+          pointerEvents="box-none"
+          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 20010 }}
+        >
+          <Pressable
+            onPress={() => { setStartTimeOpen(false); setEndTimeOpen(false); }}
+            style={StyleSheet.absoluteFillObject}
+          >
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }} />
+          </Pressable>
+
+          <View
+            style={{
+              position: 'absolute',
+              top: Math.floor(SCREEN_H * 0.25),
+              alignSelf: 'center',
+              width: Math.min(420, SCREEN_W - 16),
+              borderRadius: 16,
+              backgroundColor: theme.surface,
+              borderWidth: HAIR_SAFE,
+              borderColor: theme.border,
+              shadowColor: '#000',
+              shadowOpacity: 0.25,
+              shadowRadius: 14,
+              shadowOffset: { width: 0, height: 8 },
+              overflow: 'hidden',
+              paddingVertical: 18,
+              alignItems: 'center',
+            }}
+          >
+            <Text style={{ fontSize: 16, fontWeight: '800', color: theme.textPrimary, marginBottom: 8 }}>
+              {startTimeOpen ? '開始時刻：ドラッグで選択（離して確定）' : '終了時刻：ドラッグで選択（離して確定）'}
+            </Text>
+
+            <HourDial
+              size={380}
+              innerRatio={0.50}
+              outerRatio={0.78}
+              thresholdRatio={0.64}
+              value={startTimeOpen ? startHour : endHour}
+              onChange={(h) => {
+                if (startTimeOpen) {
+                  setStartHour(h);
+                } else {
+                  setEndHour(h);
+                }
+              }}
+              onConfirm={(h) => {
+                if (startTimeOpen) {
+                  setStartHour(h);
+                  setStartTimeOpen(false);
+                  // 時 → 文字列のHHを先に適用し、分ダイヤルへ
+                  const hh = String(h).padStart(2, '0');
+                  setStartTime(`${hh}:${String(startMinute ?? 0).padStart(2, '0')}`);
+                  setStartMinuteOpen(true);
+                } else {
+                  setEndHour(h);
+                  setEndTimeOpen(false);
+                  const hh = String(h).padStart(2, '0');
+                  setEndTime(`${hh}:${String(endMinute ?? 0).padStart(2, '0')}`);
+                  setEndMinuteOpen(true);
+                }
+              }}
+              selectedColor={theme.accent}
+              textColor={theme.textPrimary}
+            />
+          </View>
+        </View>
+      )}
+
+      {/* Minute */}
+      {addVisible && (startMinuteOpen || endMinuteOpen) && !formAllDay && (
+        <View
+          pointerEvents="box-none"
+          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 20011 }}
+        >
+          <Pressable
+            onPress={() => { setStartMinuteOpen(false); setEndMinuteOpen(false); }}
+            style={StyleSheet.absoluteFillObject}
+          >
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }} />
+          </Pressable>
+
+          <View
+            style={{
+              position: 'absolute',
+              top: Math.floor(SCREEN_H * 0.25),
+              alignSelf: 'center',
+              width: Math.min(420, SCREEN_W - 16),
+              borderRadius: 16,
+              backgroundColor: theme.surface,
+              borderWidth: HAIR_SAFE,
+              borderColor: theme.border,
+              shadowColor: '#000',
+              shadowOpacity: 0.25,
+              shadowRadius: 14,
+              shadowOffset: { width: 0, height: 8 },
+              overflow: 'hidden',
+              paddingVertical: 18,
+              alignItems: 'center',
+            }}
+          >
+            <Text style={{ fontSize: 16, fontWeight: '800', color: theme.textPrimary, marginBottom: 8 }}>
+              分をドラッグで選択（離して確定）
+            </Text>
+
+            <MinuteDial
+              size={380}
+              ringRatio={0.78}
+              value={startMinuteOpen ? startMinute : endMinute}
+              onChange={(m) => {
+                if (startMinuteOpen) setStartMinute(m);
+                else setEndMinute(m);
+              }}
+              onConfirm={(m) => {
+                if (startMinuteOpen) {
+                  setStartMinute(m);
+                  const mm = String(m).padStart(2, '0');
+                  const hh = String(startHour ?? 0).padStart(2, '0');
+                  setStartTime(`${hh}:${mm}`);
+                  setStartMinuteOpen(false);
+                } else {
+                  setEndMinute(m);
+                  const mm = String(m).padStart(2, '0');
+                  const hh = String(endHour ?? 0).padStart(2, '0');
+                  setEndTime(`${hh}:${mm}`);
+                  setEndMinuteOpen(false);
+                }
+              }}
+              selectedColor={theme.accent}
+              textColor={theme.textPrimary}
+            />
+          </View>
         </View>
       )}
     </View>
