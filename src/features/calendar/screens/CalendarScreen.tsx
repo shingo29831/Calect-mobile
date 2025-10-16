@@ -109,10 +109,9 @@ const HourDial: React.FC<HourDialProps> = memo(({
   const itemsOuter = Array.from({ length: 12 }, (_, i) => i + 12);  // 12..23
 
   const pickFromXY = useCallback((x: number, y: number) => {
-    // 中心基準に変換
     const dx = x - radius;
     const dy = y - radius;
-    // 角度: 上=0°, 時計回り (+90°の代わりに -90°基準を補正)
+
     let ang = Math.atan2(dy, dx); // -pi..pi (右=0°、上= -90°)
     ang = ang + Math.PI / 2;      // 上を 0° に
     if (ang < 0) ang += Math.PI * 2; // 0..2pi
@@ -123,8 +122,7 @@ const HourDial: React.FC<HourDialProps> = memo(({
     const ratio = r / radius;
     const isOuter = ratio >= thresholdRatio;
 
-    // 度数から 12刻みのインデックスを取得（上=0°、時計回り）
-    // 角度0°を「12時位置」とみなし、インデックスは 0..11
+    // 0°=上を 12分割
     const index = Math.round((deg / 360) * 12) % 12;
     const hour = isOuter ? (12 + index) % 24 : index;
     return hour;
@@ -189,7 +187,6 @@ const HourDial: React.FC<HourDialProps> = memo(({
       onResponderRelease={handleRelease}
       onResponderTerminate={handleRelease}
     >
-      {/* Outer and Inner Rings */}
       {ring(itemsOuter, outerRatio)}
       {ring(itemsInner, innerRatio)}
 
@@ -595,6 +592,44 @@ export default function CalendarScreen({ navigation }: Props) {
 
   const calRef = useRef<any>(null);
 
+  // ======= 日付・時刻の整合性ヘルパー =======
+  const parseHM = useCallback((t: string): number | null => {
+    const m = String(t || '').match(/^(\d{1,2}):(\d{1,2})$/);
+    if (!m) return null;
+    const hh = Math.max(0, Math.min(23, parseInt(m[1], 10)));
+    const mm = Math.max(0, Math.min(59, parseInt(m[2], 10)));
+    return hh * 60 + mm;
+  }, []);
+
+  const ensureEndDateNotBeforeStart = useCallback((s: string, e: string) => {
+    if (dayjs(e).isBefore(dayjs(s))) {
+      setEndDate(s);
+    }
+  }, []);
+
+  const ensureEndTimeNotBeforeStart = useCallback((s: string, e: string) => {
+    // All day の時はスキップ（00:00〜23:59で自然と前後関係OK）
+    if (formAllDay) return;
+    const sm = parseHM(s);
+    const em = parseHM(e);
+    if (sm != null && em != null && em < sm) {
+      setEndTime(s);
+      const mm = String(sm % 60).padStart(2, '0');
+      const hh = String(Math.floor(sm / 60)).padStart(2, '0');
+      setEndHour(Math.floor(sm / 60));
+      setEndMinute(sm % 60);
+    }
+  }, [formAllDay, parseHM]);
+
+  // 変更のたびに整合性を担保（安全網）
+  useEffect(() => {
+    ensureEndDateNotBeforeStart(startDate, endDate);
+  }, [startDate, endDate, ensureEndDateNotBeforeStart]);
+
+  useEffect(() => {
+    ensureEndTimeNotBeforeStart(startTime, endTime);
+  }, [startTime, endTime, ensureEndTimeNotBeforeStart]);
+
   // グリッド高さ計算
   const pageHeight = useMemo(() => {
     if (gridH <= 0) return 0;
@@ -902,8 +937,11 @@ export default function CalendarScreen({ navigation }: Props) {
   }, [startMinute]);
   const applyHourToEndTime = useCallback((h: number) => {
     const hh = String(Math.max(0, Math.min(23, h))).padStart(2, '0');
-    setEndTime(`${hh}:${String(endMinute ?? 0).padStart(2,'0')}`);
-  }, [endMinute]);
+    const next = `${hh}:${String(endMinute ?? 0).padStart(2,'0')}`;
+    setEndTime(next);
+    // 時を確定した直後に整合性を担保（終了<開始→終了=開始）
+    ensureEndTimeNotBeforeStart(startTime, next);
+  }, [endMinute, startTime, ensureEndTimeNotBeforeStart]);
 
   return (
     <View style={[styles.container, { backgroundColor: bgColor }]}>
@@ -1062,7 +1100,6 @@ export default function CalendarScreen({ navigation }: Props) {
 
           setAddVisible(true);
           requestAnimationFrame(() => {
-            // 開いた直後は中間スナップへ
             openAddSheet(1);
           });
         }}
@@ -1160,25 +1197,7 @@ export default function CalendarScreen({ navigation }: Props) {
                     }}
                   />
 
-                  {/* 色 */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Color (#HEX)</Text>
-                      <TextInput
-                        value={formColor}
-                        onChangeText={setFormColor}
-                        autoCapitalize="none"
-                        placeholder="#2563EB"
-                        placeholderTextColor={theme.textSecondary}
-                        selectionColor={theme.accent}
-                        style={{
-                          borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
-                          paddingHorizontal: 12, paddingVertical: 10, fontSize: 16,
-                          color: theme.textPrimary, backgroundColor: theme.appBg,
-                        }}
-                      />
-                    </View>
-                  </View>
+                  
 
                   {/* 日付 */}
                   <View style={{ marginBottom: 12 }}>
@@ -1330,6 +1349,27 @@ export default function CalendarScreen({ navigation }: Props) {
                       <Text style={{ color: theme.accentText, fontWeight: '800' }}>Add</Text>
                     </Pressable>
                   </View>
+
+
+                  {/* 色 */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Color (#HEX)</Text>
+                      <TextInput
+                        value={formColor}
+                        onChangeText={setFormColor}
+                        autoCapitalize="none"
+                        placeholder="#2563EB"
+                        placeholderTextColor={theme.textSecondary}
+                        selectionColor={theme.accent}
+                        style={{
+                          borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
+                          paddingHorizontal: 12, paddingVertical: 10, fontSize: 16,
+                          color: theme.textPrimary, backgroundColor: theme.appBg,
+                        }}
+                      />
+                    </View>
+                  </View>
                 </ScrollView>
               </View>
 
@@ -1364,13 +1404,18 @@ export default function CalendarScreen({ navigation }: Props) {
                       const et = formAllDay ? '23:59' : norm(endTime);
                       if (!st || !et) return;
 
-                      // 開始/終了日
+                      // 開始/終了日（終了 < 開始 を即補正）
                       let sDate = startDate;
                       let eDate = endDate;
                       if (dayjs(eDate).isBefore(dayjs(sDate))) eDate = sDate;
 
+                      // 終了時刻 < 開始時刻 を即補正
+                      const sm = parseHM(st) ?? 0;
+                      const em = parseHM(et) ?? 0;
+                      const endFixed = em < sm ? st : et;
+
                       const startIso = dayjs(`${sDate} ${st}`).format('YYYY-MM-DD HH:mm');
-                      const endIso   = dayjs(`${eDate} ${et}`).format('YYYY-MM-DD HH:mm');
+                      const endIso   = dayjs(`${eDate} ${endFixed}`).format('YYYY-MM-DD HH:mm');
 
                       if (!dayjs(endIso).isAfter(dayjs(startIso))) return;
 
@@ -1452,8 +1497,20 @@ export default function CalendarScreen({ navigation }: Props) {
                 [startCalOpen ? startDate : endDate]: { selected: true },
               }}
               onDayPress={(d: DateData) => {
-                if (startCalOpen) setStartDate(d.dateString);
-                else setEndDate(d.dateString);
+                if (startCalOpen) {
+                  // 開始日更新時、終了日が前にならないよう補正
+                  setStartDate(d.dateString);
+                  if (dayjs(endDate).isBefore(dayjs(d.dateString))) {
+                    setEndDate(d.dateString);
+                  }
+                } else {
+                  // 終了日選択時、開始日より前なら開始日で固定
+                  if (dayjs(d.dateString).isBefore(dayjs(startDate))) {
+                    setEndDate(startDate);
+                  } else {
+                    setEndDate(d.dateString);
+                  }
+                }
                 setStartCalOpen(false);
                 setEndCalOpen(false);
               }}
@@ -1529,15 +1586,24 @@ export default function CalendarScreen({ navigation }: Props) {
                 if (startTimeOpen) {
                   setStartHour(h);
                   setStartTimeOpen(false);
-                  // 時 → 文字列のHHを先に適用し、分ダイヤルへ
                   const hh = String(h).padStart(2, '0');
-                  setStartTime(`${hh}:${String(startMinute ?? 0).padStart(2, '0')}`);
+                  const next = `${hh}:${String(startMinute ?? 0).padStart(2, '0')}`;
+                  setStartTime(next);
+
+                  // 開始時刻更新で終了<開始なら終了=開始
+                  ensureEndTimeNotBeforeStart(next, endTime);
+
                   setStartMinuteOpen(true);
                 } else {
                   setEndHour(h);
                   setEndTimeOpen(false);
                   const hh = String(h).padStart(2, '0');
-                  setEndTime(`${hh}:${String(endMinute ?? 0).padStart(2, '0')}`);
+                  const next = `${hh}:${String(endMinute ?? 0).padStart(2, '0')}`;
+                  setEndTime(next);
+
+                  // 終了時刻更新で終了<開始なら終了=開始
+                  ensureEndTimeNotBeforeStart(startTime, next);
+
                   setEndMinuteOpen(true);
                 }
               }}
@@ -1597,14 +1663,22 @@ export default function CalendarScreen({ navigation }: Props) {
                   setStartMinute(m);
                   const mm = String(m).padStart(2, '0');
                   const hh = String(startHour ?? 0).padStart(2, '0');
-                  setStartTime(`${hh}:${mm}`);
+                  const next = `${hh}:${mm}`;
+                  setStartTime(next);
                   setStartMinuteOpen(false);
+
+                  // 開始時刻更新で終了<開始なら終了=開始
+                  ensureEndTimeNotBeforeStart(next, endTime);
                 } else {
                   setEndMinute(m);
                   const mm = String(m).padStart(2, '0');
                   const hh = String(endHour ?? 0).padStart(2, '0');
-                  setEndTime(`${hh}:${mm}`);
+                  const next = `${hh}:${mm}`;
+                  setEndTime(next);
                   setEndMinuteOpen(false);
+
+                  // 終了時刻更新で終了<開始なら終了=開始
+                  ensureEndTimeNotBeforeStart(startTime, next);
                 }
               }}
               selectedColor={theme.accent}
