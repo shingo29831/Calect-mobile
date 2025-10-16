@@ -25,8 +25,38 @@ adb uninstall com.calect
 # その後、ビルド＆再インストール
 npx react-native run-android
 
+cd android
+./gradlew clean assembleRelease
+cd ..
 
 
+
+/src
+  /features
+    /calendar
+      /screens
+        CalendarScreen.tsx
+      /ui
+        CalendarParts.tsx       // WeekHeader等を吸収した軽量UI集約
+      /components
+        DayCell.tsx
+        DayEventsSheet.tsx      // or EventModal.tsx のどちらか
+        LeftDrawer.tsx          // ProfileDrawer統合済
+        DebugHUD.tsx            // __DEV__のみ
+      index.ts                  // 再エクスポート集約（下にサンプル）
+  /store                        // 共有データ層（機能横断）
+    db.ts
+    monthShard.ts
+    localFile.ts
+    filePaths.ts
+    sync.ts
+    syncQueue.ts
+    storage.ts                  // appData.tsの役割もここに集約
+  /types
+    localTypes.ts
+  /app                          // アプリ全体の共通
+    bootstrap.ts
+    // （任意）utils/logger.ts, utils/result.ts, ui/tokens.ts など
 
 JSON形式
 
@@ -142,7 +172,7 @@ JSON形式
         "event_id": "{イベントID}",
         "calendar_id": "{イベント所有カレンダーID}",
         "title": "{タイトル}",
-        "description": "{詳細説明}",
+        "summary": "{詳細説明}",
         "start_at": "{開始時刻 HH:mm 例: 09:30}",
         "end_at": "{終了時刻 HH:mm 例: 10:30}",
         "event_shares": [
@@ -167,7 +197,7 @@ JSON形式
             "occurrence_date": "{上書き対象日 例: 2025-10-15}",
             "cancelled": "{true/false｜trueの場合、他フィールドは無視}",
             "title": "{上書きタイトル}",
-            "description": "{上書き説明}",
+            "summary": "{上書き説明}",
             "start_at": "{上書き開始時刻 HH:mm}",
             "end_at": "{上書き終了時刻 HH:mm}",
             "priority": "{上書き優先度 例: low|normal|high}"
@@ -199,7 +229,7 @@ JSON形式
       "{プランコード 例: free}": {
         "plan_code": "{プランコード 例: free}",
         "name": "{プラン名 例: Free}",
-        "description": "{説明またはnull}",
+        "summary": "{説明またはnull}",
         "max_group_members_per_group": "{数値 例: 10}",
         "max_groups_per_owner": "{数値 例: 3}",
         "max_calendars_per_owner": "{数値 例: 3}",

@@ -1,239 +1,125 @@
 // src/screens/calendar/hooks/useMonthEvents.ts
 import { useMemo } from 'react';
 import dayjs from '../../../lib/dayjs';
-import type { EventSegment } from '../../CalendarParts';
-import { startOfWeek, FIRST_DAY, MAX_BARS_PER_DAY } from '../../CalendarParts';
-import { fromUTC } from '../../../utils/time';
-import { listInstancesByDates } from '../../../store/db';
+import type { EventInstance } from '../../../api/types';
+import { listInstancesByDate } from '../../../store/db';
+import { MAX_BARS_PER_DAY } from '../../CalendarParts';
 
 type SortMode = 'span' | 'start';
 
-const makeStableKey = (ev: any) => {
-  const id = ev.event_id ?? ev.master_event_id ?? ev.series_id ?? ev.parent_id ?? null;
-  if (id != null) return `E:${String(id)}`;
-  const s = fromUTC(ev.start_at).toISOString();
-  const e = fromUTC(ev.end_at).toISOString();
-  const t = ev.title ?? '';
-  return `T:${s}|${e}|${t}`;
+/** DayCell に渡す最小セグメント型（DayCell 側の期待に合わせる） */
+export type EventSegment = EventInstance & {
+  spanLeft: boolean;
+  spanRight: boolean;
 };
 
+/** 重複判定用キー（タイトル+時刻+カレンダ） */
+const keyOf = (ev: EventInstance) =>
+  `${String(ev.calendar_id ?? '')}|${String(ev.title ?? '')}|${String(ev.start_at ?? '')}|${String(ev.end_at ?? '')}`;
+
+/** 同一日内のソート関数 */
+function makeSorter(sortMode: SortMode) {
+  if (sortMode === 'start') {
+    return (a: EventInstance, b: EventInstance) =>
+      dayjs(a.start_at).valueOf() - dayjs(b.start_at).valueOf() ||
+      (a.title || '').localeCompare(b.title || '');
+  }
+  // 'span'：長いもの優先 → 同時刻なら開始時刻→タイトル
+  return (a: EventInstance, b: EventInstance) => {
+    const spanA = dayjs(a.end_at).diff(dayjs(a.start_at), 'minute');
+    const spanB = dayjs(b.end_at).diff(dayjs(b.start_at), 'minute');
+    if (spanA !== spanB) return spanB - spanA;
+    const sa = dayjs(a.start_at).valueOf();
+    const sb = dayjs(b.start_at).valueOf();
+    if (sa !== sb) return sa - sb;
+    return (a.title || '').localeCompare(b.title || '');
+  };
+}
+
+/** 縦方向のレーンに詰める（単純な貪欲法） */
+function layoutIntoLanes(rows: EventInstance[], maxBars = MAX_BARS_PER_DAY): EventSegment[] {
+  // レーンごとに最後に置いたイベントの終了時刻（ms）
+  const laneEnd: number[] = [];
+  const placed: Array<EventSegment & { __lane: number }> = [];
+
+  for (const ev of rows) {
+    const s = dayjs(ev.start_at).valueOf();
+    const e = dayjs(ev.end_at).valueOf();
+
+    // 既存レーンに置けるかチェック
+    let lane = -1;
+    for (let i = 0; i < laneEnd.length; i++) {
+      if (s >= laneEnd[i]) { lane = i; break; }
+    }
+    if (lane === -1) {
+      lane = laneEnd.length;
+      laneEnd.push(0);
+    }
+    laneEnd[lane] = Math.max(laneEnd[lane], e);
+
+    placed.push({
+      ...ev,
+      spanLeft: false,
+      spanRight: false,
+      __lane: lane,
+    });
+  }
+
+  // レーン順→最大数まで切り出し
+  placed.sort((a, b) => a.__lane - b.__lane);
+  const limited = placed.slice(0, maxBars);
+  // ダミーの spanLeft/Right は false のまま（複数日にまたがるバーを中央で切らない前提）
+  return limited.map(({ __lane, ...seg }) => seg);
+}
+
+/**
+ * 月カレンダー用：日付配列に対して、日別 EventSegment[] と overflow 件数を返す
+ *
+ * @param monthDates YYYY-MM-DD[]（CalendarList が表示する月の全日）
+ * @param filterEventsByEntity 絞り込み（選択中のOrg/Groupなど）
+ * @param sortMode 'span'（長い順）か 'start'（開始時刻順）
+ * @param refreshKey 変更すると再計算を強制（イベント作成直後の反映用・任意）
+ */
 export function useMonthEvents(
   monthDates: string[],
   filterEventsByEntity: (arr: any[]) => any[],
-  sortMode: SortMode
+  sortMode: SortMode,
+  refreshKey?: any
 ) {
   return useMemo(() => {
-    const empty = {
-      eventsByDate: {} as Record<string, EventSegment[]>,
-      overflowByDate: {} as Record<string, number>,
-      hideRightDividerDays: new Set<string>(),
-    };
-    if (monthDates.length === 0) return empty;
+    const eventsByDate: Record<string, EventSegment[]> = {};
+    const overflowByDate: Record<string, number> = {};
 
-    // 日境界キャッシュ（ローカルTZ）
-    const dayStartCache: Record<string, dayjs.Dayjs> = {};
-    const dayEndCache: Record<string, dayjs.Dayjs> = {};
-    for (const d of monthDates) {
-      const ds = dayjs(d).startOf('day');
-      dayStartCache[d] = ds;
-      dayEndCache[d] = ds.endOf('day');
+    if (!monthDates || monthDates.length === 0) {
+      return { eventsByDate, overflowByDate };
     }
 
-    // === 参照：日別インスタンスを一括取得（内部キャッシュあり）
-    const byDateMap = listInstancesByDates(monthDates);
-    const allRaw: any[] = [];
-    for (const d of monthDates) {
-      const arr = byDateMap[d] ?? [];
-      if (arr.length) allRaw.push(...arr);
-    }
-
-    // エンティティでフィルタ
-    const allFiltered = filterEventsByEntity(allRaw);
-
-    // 重複除去（安定キー）
-    const uniq = new Map<string | number, any>();
-    for (const ev of allFiltered) {
-      const key = makeStableKey(ev);
-      if (!uniq.has(key)) uniq.set(key, ev);
-    }
-    const all = Array.from(uniq.values());
-
-    // 端末TZでそのイベントが被る日を算出
-    const coveredDatesFor = (ev: any): string[] => {
-      const res: string[] = [];
-      const s = fromUTC(ev.start_at);
-      const e = fromUTC(ev.end_at);
-      for (const d of monthDates) {
-        const overlaps = s.isBefore(dayEndCache[d]) && e.isAfter(dayStartCache[d]);
-        if (overlaps) res.push(d);
-      }
-      return res;
-    };
-
-    const idxOfDate = monthDates.reduce(
-      (acc: Record<string, number>, d: string, i: number) => ((acc[d] = i), acc),
-      {} as Record<string, number>
-    );
-
-    const keyCmp = (a: any, b: any) => makeStableKey(a).localeCompare(makeStableKey(b));
-
-    // レーン割当の優先順
-    const orderForLanes = [...all].sort((a, b) => {
-      if (sortMode === 'span') {
-        const spanA = coveredDatesFor(a).length;
-        const spanB = coveredDatesFor(b).length;
-        if (spanB !== spanA) return spanB - spanA;
-        const as = fromUTC(a.start_at).valueOf();
-        const bs = fromUTC(b.start_at).valueOf();
-        if (as !== bs) return as - bs;
-        return keyCmp(a, b);
-      }
-      const acov = coveredDatesFor(a),
-        bcov = coveredDatesFor(b);
-      const afirst = acov[0],
-        bfirst = bcov[0];
-      const aIdx = idxOfDate[afirst],
-        bIdx = idxOfDate[bfirst];
-      if (aIdx !== bIdx) return aIdx - bIdx;
-      const aContinues = fromUTC(a.start_at).isBefore(dayStartCache[afirst]) ? 1 : 0;
-      const bContinues = fromUTC(b.start_at).isBefore(dayStartCache[bfirst]) ? 1 : 0;
-      if (aContinues !== bContinues) return aContinues - bContinues;
-      const as = fromUTC(a.start_at).valueOf();
-      const bs = fromUTC(b.start_at).valueOf();
-      if (as !== bs) return as - bs;
-      return keyCmp(a, b);
-    });
-
-    // レーン割当
-    const laneDates: Array<Record<string, true>> = [];
-    const laneOf: Record<string | number, number> = {};
-    for (const ev of orderForLanes) {
-      const key = makeStableKey(ev);
-      const cov = coveredDatesFor(ev);
-      let lane = 0;
-      while (true) {
-        if (!laneDates[lane]) laneDates[lane] = {};
-        const used = laneDates[lane];
-        if (cov.every((d) => !used[d])) {
-          cov.forEach((d) => (used[d] = true));
-          laneOf[key] = lane;
-          break;
-        }
-        lane++;
-      }
-    }
-
-    const result: Record<string, EventSegment[]> = {};
-    const overflow: Record<string, number> = {};
-    const hideRightDividerDays = new Set<string>();
+    const sorter = makeSorter(sortMode);
 
     for (const d of monthDates) {
-      // その日に“少しでも重なる”イベント（DB呼び出しはしない）
-      const sDay = dayStartCache[d];
-      const eDay = dayEndCache[d];
+      // 1) DB から該当日のインスタンスを同期取得
+      const raw: EventInstance[] = listInstancesByDate(d) ?? [];
 
-      const list = all.filter((ev) => {
-        const s = fromUTC(ev.start_at);
-        const e = fromUTC(ev.end_at);
-        return s.isBefore(eDay) && e.isAfter(sDay);
-      });
-
-      const byLane: Record<number, any> = {};
-      for (const ev of list) {
-        const s = fromUTC(ev.start_at);
-        const e = fromUTC(ev.end_at);
-        const key = makeStableKey(ev);
-        const lane = laneOf[key] ?? 9999;
-        if (lane !== 9999) {
-          // 週の最初にタイトル表示
-          const weekStart = startOfWeek(dayjs(d), FIRST_DAY);
-          let firstInWeek = d;
-          for (let i = 0; i < 7; i++) {
-            const dd = weekStart.add(i, 'day').format('YYYY-MM-DD');
-            const overlaps = s.isBefore(dayEndCache[dd]) && e.isAfter(dayStartCache[dd]);
-            if (overlaps) {
-              firstInWeek = dd;
-              break;
-            }
-          }
-          const showTitle = d === firstInWeek;
-
-          if (!byLane[lane]) {
-            const spanLen = coveredDatesFor(ev).length;
-            byLane[lane] = {
-              instance_id: ev.instance_id ?? key,
-              title: ev.title ?? '(untitled)',
-              color: ev.color ?? null,
-              spanLeft: s.isBefore(sDay),
-              spanRight: e.isAfter(eDay),
-              showTitle,
-              __lane: lane,
-              __startMs: fromUTC(ev.start_at).valueOf(),
-              __key: key,
-              __startsToday: !s.isBefore(sDay),
-              __spanLen: spanLen,
-            };
-          }
-        }
+      // 2) エンティティで絞り込み → 重複除去
+      const filtered = filterEventsByEntity(raw);
+      const uniq: EventInstance[] = [];
+      const seen = new Set<string>();
+      for (const ev of filtered) {
+        const k = keyOf(ev);
+        if (!seen.has(k)) { seen.add(k); uniq.push(ev); }
       }
 
-      const laneIndices = Object.keys(byLane).map(Number);
-      let slots: EventSegment[] = [];
-      let displayedCount = 0;
+      // 3) ソート → レーン詰め（MAX_BARS_PER_DAY まで表示）
+      const sorted = uniq.sort(sorter);
+      const laid = layoutIntoLanes(sorted, MAX_BARS_PER_DAY);
 
-      if (laneIndices.some((ln) => byLane[ln]?.spanRight)) {
-        hideRightDividerDays.add(d);
-      }
-
-      if (sortMode === 'start') {
-        const segs = laneIndices.sort((a, b) => a - b).map((ln) => byLane[ln]);
-        segs.sort((A: any, B: any) => {
-          if (A.__startsToday !== B.__startsToday) return A.__startsToday ? -1 : 1;
-          if (A.__startMs !== B.__startMs) return A.__startMs - B.__startMs;
-          return String(A.__key).localeCompare(String(B.__key));
-        });
-
-        const limit = Math.min(MAX_BARS_PER_DAY, segs.length);
-        displayedCount = limit;
-        for (let i = 0; i < limit; i++) {
-          const { __lane, __startMs, __key, __startsToday, __spanLen, ...seg } = segs[i];
-          slots.push(seg as EventSegment);
-        }
-        while (slots.length < Math.min(MAX_BARS_PER_DAY, Math.max(segs.length, 0))) {
-          slots.push({
-            instance_id: `__spacer-${d}-fill-${slots.length}`,
-            title: '',
-            spanLeft: false,
-            spanRight: false,
-            showTitle: false,
-            __spacer: true,
-          } as any);
-        }
-      } else {
-        const lanesTodaySortedByImportance = laneIndices
-          .filter((ln) => !!byLane[ln])
-          .sort((a, b) => {
-            const A = byLane[a],
-              B = byLane[b];
-            if (A.__spanLen !== B.__spanLen) return B.__spanLen - A.__spanLen;
-            if (A.__startMs !== B.__startMs) return A.__startMs - B.__startMs;
-            return String(A.__key).localeCompare(String(B.__key));
-          });
-
-        const chosen = lanesTodaySortedByImportance.slice(0, MAX_BARS_PER_DAY);
-        displayedCount = chosen.length;
-        chosen.sort((a, b) => a - b);
-
-        for (const lane of chosen) {
-          const { __lane, __startMs, __key, __startsToday, __spanLen, ...seg } = byLane[lane];
-          slots.push(seg as EventSegment);
-        }
-      }
-
-      overflow[d] = Math.max(0, (list?.length ?? 0) - displayedCount);
-      result[d] = slots;
+      eventsByDate[d] = laid;
+      overflowByDate[d] = Math.max(0, sorted.length - laid.length);
     }
 
-    return { eventsByDate: result, overflowByDate: overflow, hideRightDividerDays };
-  }, [monthDates, filterEventsByEntity, sortMode]);
+    return { eventsByDate, overflowByDate };
+    // monthDates/filter/sortMode に加えて refreshKey を依存に含めるのがミソ
+  }, [monthDates, filterEventsByEntity, sortMode, refreshKey]);
 }
+
+export default useMonthEvents;

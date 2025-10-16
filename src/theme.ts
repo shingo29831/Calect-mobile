@@ -25,6 +25,7 @@ export type Theme = {
   // event defaults
   eventDefaultFg: string;
   eventDefaultBg: string; // rgba などOK
+  sheetBackdrop: string; // ボトムシート用の半透明背景
 };
 
 const LIGHT: Theme = {
@@ -36,6 +37,7 @@ const LIGHT: Theme = {
   textSecondary: '#475569',
   accent: '#2563eb',
   accentText: '#ffffff',
+  sheetBackdrop: 'rgba(0,0,0,0.35)',
   lineColor: '#e6e9ef',
   lineColorSelected: '#94a3b8',
   dayDisabled: '#9ca3af',
@@ -55,6 +57,7 @@ const DARK: Theme = {
   textSecondary: '#94a3b8',
   accent: '#60a5fa',
   accentText: '#0b1220',
+  sheetBackdrop: 'rgba(0,0,0,0.6)',
   lineColor: '#223045',
   lineColorSelected: '#64748b',
   dayDisabled: '#94a3b8',
