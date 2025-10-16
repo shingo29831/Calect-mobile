@@ -1,21 +1,47 @@
 ﻿/**
  * App bootstrap entry
- * - 繝ｭ繝ｼ繧ｫ繝ｫ繝・・繧ｿ縺ｮ繝ｭ繝ｼ繝・
- * - 繧｢繝励Μ蜀・B縺ｸ縺ｮ謚募・
- * - 蜷梧悄縺ｮ襍ｷ蜍包ｼ亥ｿ・ｦ∵凾・・
+ * - ローカルスナップショット読込
+ * - 増分同期の起動
+ * - 表示層（月シャード）を最新化
  */
-import { loadLocalStore } from "../../data/persistence/localStore";
+import { loadLocalStore, compactStorage } from "../../data/persistence/localStore";
+import { ensureMonths } from "../../data/persistence/monthShard"; // ← 位置が違う場合は調整
 import { replaceAllInstances } from "../../store/db";
 import { runIncrementalSync, exampleFetchServerDiff } from "../../data/sync/runIncrementalSync";
 import type { FetchServerDiff, ServerDiffResponse } from "../../data/sync/runIncrementalSync";
 
+/* ===== ユーティリティ ===== */
+function ym(d: Date) {
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  return `${y}-${m.toString().padStart(2, "0")}`;
+}
+function addMonths(base: Date, diff: number) {
+  const d = new Date(base);
+  d.setMonth(d.getMonth() + diff);
+  return d;
+}
 
 export async function bootstrapApp() {
-  // 1) 繝ｭ繝ｼ繧ｫ繝ｫ縺ｮ繧ｹ繝翫ャ繝励す繝ｧ繝・ヨ繧定ｪｭ繧
+  /* --- A-1: ops.ndjson を月別ストレージへ反映（圧縮） --- */
+  try {
+    await compactStorage();
+  } catch (e) {
+    console.warn("compactStorage failed (continue anyway):", e);
+  }
+
+  /* --- A-2: 前月・当月・翌月の月シャードを確保（表示の土台） --- */
+  try {
+    const now = new Date();
+    const months = [ym(addMonths(now, -1)), ym(now), ym(addMonths(now, 1))];
+    await ensureMonths(months);
+  } catch (e) {
+    console.warn("ensureMonths failed (continue anyway):", e);
+  }
+
+  /* --- ローカルスナップショット反映（初期表示を即復元） --- */
   try {
     const snapshot = await loadLocalStore();
-
-    // 2) 逕ｻ髱｢縺九ｉ蜿ら・縺吶ｋ 窶懊い繝励Μ蜀・B窶・繧堤ｽｮ謠・
     if (snapshot?.instances?.length) {
       await replaceAllInstances(snapshot.instances);
     }
@@ -23,9 +49,8 @@ export async function bootstrapApp() {
     console.warn("loadLocalStore failed (continue without local snapshot):", e);
   }
 
-  // 3) 繧ｵ繝ｼ繝仙｢怜・蜷梧悄
+  /* --- サーバ増分同期（オンラインなら最新化） --- */
   try {
-    // 譛ｬ螳溯｣・
     await runIncrementalSync(exampleFetchServerDiff);
   } catch (e) {
     console.warn("runIncrementalSync failed (will continue offline):", e);

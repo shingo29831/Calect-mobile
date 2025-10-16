@@ -3,8 +3,8 @@ import dayjs from "../../lib/dayjs";
 import type { EventInstance } from "../../api/types";
 import { fromUTC, startOfLocalDay, endOfLocalDay } from "../../utils/time";
 
-// 例: /Documents/appdata/shards/2025-03.json
-const DIR = `${RNFS.DocumentDirectoryPath}/appdata/shards`;
+// 例: /files/calect/months/2025-03.json
+const DIR = `${RNFS.DocumentDirectoryPath}/calect/months`;
 
 const memMonthCache = new Map<string, EventInstance[]>(); // "YYYY-MM" -> instances[]
 const loading = new Map<string, Promise<void>>();
@@ -19,7 +19,12 @@ async function ensureDir() {
   if (!(await RNFS.exists(DIR))) await RNFS.mkdir(DIR);
 }
 
-/** 月の読み込み（メモリキャッシュ＋ファイル） */
+/** 月がキャッシュ済みかどうか（存在チェックのみ） */
+export function hasMonthInCache(yyyyMM: string) {
+  return memMonthCache.has(yyyyMM);
+}
+
+/** 月の読み込み（メモリキャッシュ＋ファイル：新パスのみ） */
 export async function loadMonth(yyyyMM: string) {
   if (memMonthCache.has(yyyyMM)) return;
   if (loading.has(yyyyMM)) return loading.get(yyyyMM)!;
@@ -53,6 +58,14 @@ export async function prefetchMonthRange(centerYYYYMM: string, span = 1) {
   await ensureMonths(keys);
 }
 
+/** 指定月の配列を取得（未ロードなら自動ロードしてから返す） */
+export async function getMonthInstances(yyyyMM: string): Promise<EventInstance[]> {
+  if (!memMonthCache.has(yyyyMM)) {
+    await loadMonth(yyyyMM);
+  }
+  return memMonthCache.get(yyyyMM) ?? [];
+}
+
 /** 1日分のインスタンス取得（ローカルTZで範囲判定） */
 export function getInstancesForDate(dateISO: string): EventInstance[] {
   const yyyyMM = monthKeyFromISO(dateISO);
@@ -67,7 +80,7 @@ export function getInstancesForDate(dateISO: string): EventInstance[] {
   });
 }
 
-/** 1か月分を上書き保存（メモリ＋ディスク） */
+/** 1か月分を上書き保存（メモリ＋ディスク：新パスに統一） */
 export async function upsertMonthInstances(yyyyMM: string, rows: EventInstance[]) {
   await ensureDir();
   memMonthCache.set(yyyyMM, rows);

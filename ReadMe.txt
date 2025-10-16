@@ -29,6 +29,9 @@ cd android
 ./gradlew clean assembleRelease
 cd ..
 
+アプリ内ファイル一覧
+adb shell run-as com.calect ls -R
+
 
 
 /src
