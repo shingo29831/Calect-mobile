@@ -1,8 +1,8 @@
 ﻿// src/store/db.ts
 // ===============================================
 // ローカルDB + ローカル永続化（snapshot / ops.ndjson）
-// - createEventLocal: 1件のイベント作成→ローカルDB反映＆永続化（従来）
-// - createEventLocalAndShard: ↑に加えて月シャードへもライトスルー（今回追加）
+// - createEventLocal: 1件のイベント作成→ローカルDB反映＆永続化
+// - createEventLocalAndShard: ↑に加えて月シャードへもライトスルー
 // - replaceAllInstances: メモリDBを丸ごと差し替え
 // - listInstancesByDate: 日付での可視インスタンス抽出（ローカルTZ日境界）
 // - getAllTags: タグ一覧
@@ -13,11 +13,10 @@ import dayjs from '../lib/dayjs';
 import type { EventInstance, Event, ULID } from '../api/types';
 import { startOfLocalDay, endOfLocalDay } from '../utils/time';
 import { loadLocalStore, saveLocalStore, appendOps } from './localFile.ts';
-
-// ← 追加（C対応：月シャードAPIを使用）
+// 月シャードAPI（新パス統一）
 import { upsertMonthInstances, getMonthInstances } from '../data/persistence/monthShard';
 
-// ====== ULID 生成（event.event_id 用、Crockford Base32）======
+// ====== ULID 生成（Crockford Base32）======
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 function ulid(now = Date.now()): ULID {
   let ts = now;
@@ -98,7 +97,7 @@ export function listInstancesByDate(dateISO: string): EventInstance[] {
 export type CreateEventInput = {
   // 必須
   title: string;
-  start_at: string; // ISO（TZ付き/なしOK：dayjs側で扱う）
+  start_at: string; // ISO（TZ付き/なしOK）
   end_at: string;
 
   // 任意
@@ -115,12 +114,14 @@ export type CreateEventInput = {
 // Event -> 単発の EventInstance（繰り返しは別途）
 function eventToSingleInstance(ev: Event): EventInstance {
   return {
-    instance_id: Date.now(), // 一時的ユニークID（厳密性が必要なら置換）
+    instance_id: Date.now(), // 一時的ユニークID（必要なら後で廃止可）
     calendar_id: ev.calendar_id,
-    event_id: ev.event_id,
+    event_id: ev.event_id,        // 確定前は cid_ulid と同値
+    cid_ulid: ev.cid_ulid ?? null,
     title: ev.title,
     start_at: ev.start_at,
     end_at: ev.end_at,
+    occurrence_key: `${ev.event_id}@@${ev.start_at}`, // ユニーク判定用
   };
 }
 
@@ -140,12 +141,16 @@ async function upsertTagsToStore(newTags: string[]) {
   } catch {}
 }
 
-// ====== 従来の“作成→ローカル保存” ======
+// ====== 作成→ローカル保存（cid_ulid 付与） ======
 export async function createEventLocal(input: CreateEventInput): Promise<EventInstance> {
   const nowIso = new Date().toISOString();
 
+  // ★ 一時IDを発行（オフライン作成時の冪等キー）
+  const cid = ulid();
+
   const ev: Event = {
-    event_id: ulid(),
+    event_id: cid,                 // 確定前は cid を event_id に仮セット
+    cid_ulid: cid,                 // 一時ID保持（同期で置換キーに使う）
     calendar_id: (input.calendar_id ?? 'CAL_LOCAL_DEFAULT') as ULID,
     title: input.title.trim(),
     summary: input.summary ?? null,
@@ -165,7 +170,7 @@ export async function createEventLocal(input: CreateEventInput): Promise<EventIn
   const incomingTags = input.style?.tags ?? [];
   if (incomingTags.length) upsertTagsToStore(incomingTags);
 
-  // ローカル保存（非同期でもOK）
+  // ローカル保存（スナップショット + ops 追記）
   (async () => {
     try {
       const storeAny: any = await loadLocalStore();
@@ -183,7 +188,9 @@ export async function createEventLocal(input: CreateEventInput): Promise<EventIn
       storeAny._tags = storeAny.tags;
 
       await saveLocalStore(storeAny);
-      await appendOps([{ type: 'upsert', entity: 'instance', row: inst, updated_at: nowIso }]);
+
+      // ★ ops にも cid_ulid を含めて記録（冪等・置換用）
+      await appendOps([{ type: 'upsert', entity: 'instance', row: { ...inst, cid_ulid: cid }, updated_at: nowIso }]);
     } catch (e) {
       if (__DEV__) console.warn('[createEventLocal] persist failed:', e);
     }
@@ -194,9 +201,9 @@ export async function createEventLocal(input: CreateEventInput): Promise<EventIn
 
 // ====== 追加：作成時に“月シャードへもライトスルー” ======
 
-// インスタンスの一意キーを作る（instance_id が無ければ event_id+start_at）
-function getInstanceKey(x: Pick<EventInstance, 'instance_id' | 'event_id' | 'start_at'>) {
-  return (x as any).instance_id ?? `${x.event_id}@@${x.start_at}`;
+// インスタンスの一意キー（occurrence_key > instance_id > event_id+start_at）
+function getInstanceKey(x: Pick<EventInstance, 'instance_id' | 'event_id' | 'start_at' | 'occurrence_key' | 'cid_ulid'>) {
+  return (x as any).occurrence_key ?? (x as any).instance_id ?? `${x.event_id}@@${x.start_at}`;
 }
 
 // 既存＋追加をユニーク結合
@@ -213,7 +220,7 @@ function mergeUniqueByKey(existing: EventInstance[], add: EventInstance[]) {
  * 画面側は createEventLocal の代わりにこちらを呼んでください。
  */
 export async function createEventLocalAndShard(input: CreateEventInput): Promise<EventInstance> {
-  // 1) まずローカルDB & 永続化（既存の流れ）
+  // 1) まずローカルDB & 永続化
   const inst = await createEventLocal(input);
 
   // 2) 対象月（YYYY-MM）を算出（start_at 基準）

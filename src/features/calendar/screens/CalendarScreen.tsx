@@ -2,16 +2,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue, memo } from 'react';
 import {
   View, Text, Pressable, Platform, TextInput, KeyboardAvoidingView, Animated,
-  Image, StyleSheet, Switch, PanResponder, GestureResponderEvent, PanResponderGestureState, ScrollView
+  Image, StyleSheet, Switch, PanResponder, GestureResponderEvent, PanResponderGestureState, ScrollView, Alert
 } from 'react-native';
 import type { AppStateStatus } from 'react-native';
 import { CalendarList } from 'react-native-calendars';
 import { Calendar as MiniCalendar } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
 import dayjs from '../../../lib/dayjs';
-import { listInstancesByDate, createEventLocal, getAllTags } from '../../../store/db';
+import { listInstancesByDate, getAllTags, createEventLocalAndShard } from '../../../store/db';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../../navigation';
+
+// ★ 月シャードAPI（新パス固定）
+import {
+  ensureMonths as ensureMonthsLoaded,
+  loadMonth as ensureMonthLoaded,
+} from '../../../data/persistence/monthShard';
+
+// ★ ローカル全初期化（snapshot / ops / months / queue 等）
+import { resetLocalData } from '../../../data/persistence/localStore';
 
 import {
   EntityItem,
@@ -680,7 +689,7 @@ export default function CalendarScreen({ navigation }: Props) {
   const enabledMonthDates = dbReady ? monthDates : [];
   const { eventsByDate, overflowByDate } = useMonthEvents(enabledMonthDates, filterEventsByEntity, sortMode, refreshKey);
 
-  // 初回同期
+  // ====== 初回同期（= 月データの事前ロード） ======
   useEffect(() => {
     if (hasSyncedRef.current) return;
 
@@ -700,23 +709,15 @@ export default function CalendarScreen({ navigation }: Props) {
 
     (async () => {
       try {
-        const mod = (await import('../../../data/persistence/monthShard').catch(() => null)) as
-          | { ensureMonthLoaded?: (m: string)=>Promise<void>; ensureMonthsLoaded?: (ms: string[])=>Promise<void> }
-          | null;
-
         const center = dayjs(currentMonth + '-01');
         const months = [center.subtract(1,'month').format('YYYY-MM'), center.format('YYYY-MM'), center.add(1,'month').format('YYYY-MM')];
 
-        const ensurePromise = mod?.ensureMonthsLoaded
-          ? mod.ensureMonthsLoaded(months)
-          : mod?.ensureMonthLoaded
-            ? Promise.all(months.map(m => mod.ensureMonthLoaded!(m)))
-            : Promise.resolve();
-
         hardTimer = setTimeout(() => finish({ ok: false, timedOut: true }), 2500);
-        await ensurePromise;
+        await ensureMonthsLoaded(months);
         finish({ ok: true });
-      } catch { finish({ ok: false }); }
+      } catch {
+        finish({ ok: false });
+      }
     })();
 
     return () => { if (hardTimer) clearTimeout(hardTimer); };
@@ -728,7 +729,52 @@ export default function CalendarScreen({ navigation }: Props) {
     return () => clearTimeout(t);
   }, [syncTimedOut]);
 
-  // ヘッダー
+  // ====== ローカルデータのリセット（resetLocalData 使用） ======
+  const visitedMonthsRef = useRef<Set<string>>(new Set());
+  const runResetLocal = useCallback(async () => {
+    try {
+      setSyncing(true);
+
+      // 1) 端末内データ削除（snapshot / months / ops / queue など）
+      await resetLocalData();
+
+      // 2) メモリ内のキャッシュ・状態をクリア（存在しない場合は無視）
+      try {
+        const ms = await import('../../../data/persistence/monthShard');
+        (ms as any).clearMonthCache?.();
+      } catch {} 
+      try {
+        const db = await import('../../../store/db');
+        db.replaceAllInstances?.([]);
+      } catch {}
+      visitedMonthsRef.current.clear();
+      setSheetVisible(false);
+
+      // 3) 画面側状態のリフレッシュ
+      setDbReady(false);
+      setRefreshKey((v) => v + 1);
+
+      // 4) 直近±1か月を再ロード（空状態で即復帰）
+      const center = dayjs(currentMonth + '-01');
+      const months = [
+        center.subtract(1, 'month').format('YYYY-MM'),
+        center.format('YYYY-MM'),
+        center.add(1, 'month').format('YYYY-MM'),
+      ];
+      await ensureMonthsLoaded(months);
+
+      setDbReady(true);
+      Alert.alert('リセット完了', 'ローカルデータを初期化しました。');
+    } catch (e) {
+      console.warn('[runResetLocal] failed:', e);
+      Alert.alert('リセットに失敗しました', String(e ?? 'unknown error'));
+    } finally {
+      setSyncing(false);
+      setSyncTimedOut(false);
+    }
+  }, [currentMonth]);
+
+  // 背景などヘッダー設定…
   useEffect(() => {
     const showEmoji = selectedEntity.kind === 'group';
     const headerLeft = () => (
@@ -846,8 +892,7 @@ export default function CalendarScreen({ navigation }: Props) {
     [colWBase, colWLast, cellH, eventsByDate, overflowByDate, dbReady]
   );
 
-  // 先読み
-  const visitedMonthsRef = useRef<Set<string>>(new Set());
+  // 先読み（前後 -2,-1,+1,+2 ヶ月）
   useEffect(() => {
     if (!dbReady) return;
     const run = async () => {
@@ -858,11 +903,7 @@ export default function CalendarScreen({ navigation }: Props) {
       const { InteractionManager } = require('react-native');
       await new Promise<void>((resolve) => { InteractionManager.runAfterInteractions(() => resolve()); });
       try {
-        const mod = (await import('../../../data/persistence/monthShard').catch(() => null)) as
-          | { ensureMonthLoaded?: (m: string)=>Promise<void>; ensureMonthsLoaded?: (ms: string[])=>Promise<void> }
-          | null;
-        if (mod?.ensureMonthsLoaded) await mod.ensureMonthsLoaded(targets);
-        else if (mod?.ensureMonthLoaded) await Promise.all(targets.map((m) => mod.ensureMonthLoaded!(m)));
+        await ensureMonthsLoaded(targets);
         targets.forEach((t) => visitedMonthsRef.current.add(t));
       } catch {}
     };
@@ -877,8 +918,7 @@ export default function CalendarScreen({ navigation }: Props) {
       if (last.match(/inactive|background/) && s === 'active') {
         const m = dayjs(currentMonth + '-01').add(1, 'month').format('YYYY-MM');
         if (!visitedMonthsRef.current.has(m)) {
-          import('../../../data/persistence/monthShard')
-            .then((mod) => (mod as { ensureMonthLoaded?: (month: string) => Promise<void> } | null)?.ensureMonthLoaded?.(m))
+          ensureMonthLoaded(m)
             .then(() => visitedMonthsRef.current.add(m))
             .catch(() => {});
         }
@@ -966,7 +1006,8 @@ export default function CalendarScreen({ navigation }: Props) {
       const color = (formColor || '').trim();
       const validColor = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(color) ? color : undefined;
 
-      await createEventLocal({
+      // ★ 月シャードにもライトスルーするAPIに変更
+      await createEventLocalAndShard({
         calendar_id: formCalId,
         title: formTitle.trim(),
         summary: formSummary.trim(),
@@ -1015,7 +1056,24 @@ export default function CalendarScreen({ navigation }: Props) {
           {/* 月タイトル */}
           <View style={{ height: MONTH_TITLE_HEIGHT, alignItems: 'center', justifyContent: 'center' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Text style={[styles.monthTitle, { color: theme.textPrimary }]}>{dayjs(currentMonth + '-01').format('YYYY MMM')}</Text>
+              {/* ★ 長押しでローカルリセット */}
+              <Pressable
+                onLongPress={() => {
+                  Alert.alert(
+                    'ローカルデータのリセット',
+                    '端末内のスナップショット／月シャード／キューを全て削除します。よろしいですか？',
+                    [
+                      { text: 'キャンセル', style: 'cancel' },
+                      { text: 'リセット', style: 'destructive', onPress: () => runResetLocal() },
+                    ],
+                  );
+                }}
+                hitSlop={10}
+              >
+                <Text style={[styles.monthTitle, { color: theme.textPrimary }]}>
+                  {dayjs(currentMonth + '-01').format('YYYY MMM')}
+                </Text>
+              </Pressable>
 
               {/* ソートピル */}
               <View style={[styles.sortPills, { backgroundColor: 'transparent' }]}>

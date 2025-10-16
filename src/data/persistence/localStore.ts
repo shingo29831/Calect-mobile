@@ -1,18 +1,19 @@
-﻿import RNFS from "react-native-fs";
+﻿// src/data/persistence/localStore.ts
+import RNFS from "react-native-fs";
 import dayjs from "../../lib/dayjs";
 import type { EventInstance, Calendar } from "../../api/types";
 import { ensureDirs, SNAPSHOT_PATH, OPS_LOG_PATH, monthFile, atomicWrite } from "./filePaths";
 import type { LocalStoreSchema, AnyOp } from "./schemas";
 import { emptyStore as EMPTY_TEMPLATE } from "./schemas";
 
-/** ===== 蝓ｺ譛ｬ繝ｦ繝ｼ繝・ぅ繝ｪ繝・ぅ ===== */
+/** ===== 安全読み込み（存在しなければ null） ===== */
 async function safeRead(path: string): Promise<string | null> {
   const ok = await RNFS.exists(path);
   if (!ok) return null;
   return RNFS.readFile(path, "utf8");
 }
 
-/** ===== 1) 譌｢蟄倅ｺ呈鋤・壹ヵ繝ｫ繧ｹ繝翫ャ繝励す繝ｧ繝・ヨ ===== */
+/** ===== 1) スナップショット（アプリ全体のローカル状態） ===== */
 export async function loadLocalStore(): Promise<LocalStoreSchema> {
   await ensureDirs();
   const raw = await safeRead(SNAPSHOT_PATH);
@@ -20,7 +21,7 @@ export async function loadLocalStore(): Promise<LocalStoreSchema> {
   try {
     return JSON.parse(raw) as LocalStoreSchema;
   } catch {
-    // 螢翫ｌ縺ｦ縺・※繧り誠縺ｨ縺輔↑縺・
+    // 壊れていたら空テンプレで復旧
     return { ...EMPTY_TEMPLATE };
   }
 }
@@ -30,11 +31,11 @@ export async function saveLocalStore(store: LocalStoreSchema) {
   await atomicWrite(SNAPSHOT_PATH, JSON.stringify(store));
 }
 
-// 莠呈鋤・啼mptyStore 繧・export・亥､夜Κ縺ｧ import 縺輔ｌ縺ｦ縺・ｋ縺溘ａ・・
+// emptyStore を export（他箇所で初期テンプレ参照用）
 export const emptyStore: LocalStoreSchema = { ...EMPTY_TEMPLATE };
 
-/** ===== 2) 蟾ｮ蛻・Ο繧ｰ・夊ｿｽ險・/ 繝ｭ繝ｼ繝・===== */
-// NDJSON 縺ｧ霑ｽ險假ｼ・陦・繧ｪ繝夲ｼ・
+/** ===== 2) オペログ（ops.ndjson 相当） ===== */
+// NDJSON を追記保存
 export async function appendOps(ops: AnyOp[]) {
   if (!ops.length) return;
   await ensureDirs();
@@ -42,7 +43,7 @@ export async function appendOps(ops: AnyOp[]) {
   await RNFS.appendFile(OPS_LOG_PATH, lines, "utf8");
 }
 
-// 繧ｪ繝壹Ο繧ｰ繧貞・蜿門ｾ暦ｼ亥ｿ・ｦ√↓縺ｪ縺｣縺溘ｉ streaming 縺ｫ螟画峩・・
+// 全オペ読み込み（必要あればストリーム化可）
 export async function readAllOps(): Promise<AnyOp[]> {
   await ensureDirs();
   const raw = await safeRead(OPS_LOG_PATH);
@@ -54,13 +55,13 @@ export async function readAllOps(): Promise<AnyOp[]> {
     try {
       out.push(JSON.parse(s));
     } catch {
-      // 遐ｴ謳崎｡後・謐ｨ縺ｦ繧具ｼ亥ｮ牙・蛛ｴ・・
+      // 破損行はスキップ
     }
   }
   return out;
 }
 
-/** ===== 3) 譛医＃縺ｨ蛻・牡・夊ｪｭ縺ｿ譖ｸ縺・===== */
+/** ===== 3) 月ファイル（YYYY-MM.json）読み書き ===== */
 function yyyymmFromISO(iso: string): string {
   return dayjs(iso).format("YYYY-MM");
 }
@@ -84,19 +85,21 @@ export async function writeMonth(yyyyMM: string, rows: EventInstance[]) {
   await atomicWrite(p, JSON.stringify(rows));
 }
 
-/** ===== 4) 繧ｯ繧ｨ繝ｪ・壼ｿ・ｦ√↑譛医□縺題ｪｭ繧・・蟾ｮ蛻・←逕ｨ・・===== */
+/** ===== 4) 複数日（YYYY-MM-DD[]）のインスタンスをまとめてロード =====
+ *  - まず月ファイルを読み、続いて ops を当てて上書き（簡易リプレイ）
+ */
 export async function loadInstancesForDates(dates: string[]): Promise<EventInstance[]> {
   await ensureDirs();
   const months = Array.from(new Set(dates.map((d) => dayjs(d).format("YYYY-MM"))));
 
-  // 1) 蟇ｾ雎｡譛医ヵ繧｡繧､繝ｫ繧定ｪｭ縺ｿ髮・ａ
+  // 1) 月ファイルの集合
   const base: EventInstance[] = [];
   for (const m of months) {
     const rows = await readMonth(m);
     base.push(...rows);
   }
 
-  // 2) 蟾ｮ蛻・Ο繧ｰ繧定ｪｭ縺ｿ縲∝ｯｾ雎｡譛医↓隧ｲ蠖薙☆繧九ｂ縺ｮ繧帝←逕ｨ
+  // 2) ops を当てて最終状態へ
   const ops = await readAllOps();
   if (ops.length) {
     const idx = new Map<string | number, EventInstance>();
@@ -117,15 +120,13 @@ export async function loadInstancesForDates(dates: string[]): Promise<EventInsta
   return base;
 }
 
-/** ===== 5) 繧ｳ繝ｳ繝代け繧ｷ繝ｧ繝ｳ・亥ｷｮ蛻・Ο繧ｰ 竊・譛医ヵ繧｡繧､繝ｫ縺ｸ蜷ｸ蜿趣ｼ・=====
- *  - 螟ｧ縺阪￥縺ｪ縺｣縺・ops.ndjson 繧貞推譛医↓蜿肴丐縺礼峩縺励※遨ｺ縺ｫ縺吶ｋ
- */
+/** ===== 5) コンパクション（ops → 月ファイルへ反映し ops を空に） ===== */
 export async function compactStorage() {
   await ensureDirs();
   const ops = await readAllOps();
   if (!ops.length) return;
 
-  // ops 繧呈怦縺斐→縺ｫ蛻・・縺励※驕ｩ逕ｨ
+  // ops を月ごとに集計（delete は全体扱い）
   const byMonth = new Map<string, { upserts: EventInstance[]; deletes: Array<string | number> }>();
   for (const op of ops) {
     if (op.entity !== "instance") continue;
@@ -152,10 +153,11 @@ export async function compactStorage() {
     await writeMonth(m, Array.from(map.values()));
   }
 
+  // ops をクリア
   await atomicWrite(OPS_LOG_PATH, "");
 }
 
-/** ===== 6) 繝輔Ν繝ｭ繝ｼ繝我ｺ呈鋤 ===== */
+/** ===== 6) 初期ロード用のまとめ読み ===== */
 export async function loadCalendarsAndAllInstances(): Promise<{
   calendars: Calendar[];
   instances: EventInstance[];
@@ -169,4 +171,50 @@ export async function loadCalendarsAndAllInstances(): Promise<{
     lastSyncAt: snap.lastSyncAt,
     lastSyncCursor: snap.lastSyncCursor,
   };
+}
+
+/** ===== 7) ★ローカルデータの完全リセット =====
+ * - months ディレクトリ配下の月ファイル削除
+ * - ops ログを空に
+ * - 送信キュー（存在すれば）削除
+ * - snapshot.json を空テンプレで上書き
+ */
+export async function resetLocalData(): Promise<void> {
+  await ensureDirs();
+
+  // 1) months 配下を全削除
+  try {
+    const sample = monthFile("2000-01"); // e.g. /.../calect/months/2000-01.json
+    const MONTHS_DIR = sample.replace(/\/[^/]+$/, "");
+    if (await RNFS.exists(MONTHS_DIR)) {
+      const files = await RNFS.readDir(MONTHS_DIR);
+      for (const f of files) {
+        try {
+          // 念のため .json だけ削除
+          if (f.isFile() && /\.json$/i.test(f.name)) {
+            await RNFS.unlink(f.path);
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+
+  // 2) ops ログを空に
+  try {
+    await atomicWrite(OPS_LOG_PATH, "");
+  } catch {}
+
+  // 3) 送信キュー（存在すれば）削除
+  try {
+    const QUEUE_FILE = `${RNFS.DocumentDirectoryPath}/calect/queue/events.queue.jsonl`;
+    if (await RNFS.exists(QUEUE_FILE)) {
+      await RNFS.unlink(QUEUE_FILE);
+    }
+  } catch {}
+
+  // 4) snapshot.json を空テンプレで上書き
+  try {
+    const empty = { ...EMPTY_TEMPLATE, lastSyncAt: null, lastSyncCursor: null };
+    await atomicWrite(SNAPSHOT_PATH, JSON.stringify(empty));
+  } catch {}
 }

@@ -1,7 +1,7 @@
 ﻿// src/data/sync/runIncrementalSync.ts
 // クライアント側の“増分同期”ロジック。
 // - サーバから upserts/deletes を受け取り、ローカルスナップショットへマージ
-// - マージ結果を保存し、UI用のアプリ内DBへ反映
+// - マージ結果を保存し、UI用のアプリ内DBへ反映（cid_ulid→event_id の置換もここで実施）
 
 import dayjs from "../../lib/dayjs";
 import type { Calendar, EventInstance } from "../../api/types";
@@ -12,6 +12,12 @@ import { replaceAllInstances } from "../../store/db";
 
 type UpsertCalendars = Calendar & { updated_at?: string | null; deleted_at?: string | null };
 type UpsertInstances = EventInstance & { updated_at?: string | null; deleted_at?: string | null };
+
+type IdMapEvent = {
+  entity: "event";
+  cid_ulid: string;  // クライアント一時ID
+  event_id: string;  // サーバ確定ID
+};
 
 /** サーバから返る“差分”の構造 */
 export type ServerDiffResponse = {
@@ -27,6 +33,8 @@ export type ServerDiffResponse = {
     calendars?: string[];               // calendar_id[]
     instances?: Array<number | string>; // instance_id[]
   };
+  /** ★cid→正規ID マッピング（オフライン作成分の確定） */
+  id_maps?: IdMapEvent[];
 };
 
 /** 差分取得関数の型（since は前回の cursor） */
@@ -47,10 +55,18 @@ function indexBy<T extends Record<string, any>>(rows: T[], key: keyof T) {
   return m;
 }
 
+/** 置換用：event_id + start_at から occurrence_key を再計算 */
+function computeOccurrenceKey(it: Pick<EventInstance, "event_id" | "start_at">) {
+  return `${it.event_id}@@${it.start_at}`;
+}
+
 /* =============================== マージ処理本体 =============================== */
 
 type LocalStore = Awaited<ReturnType<typeof loadLocalStore>>;
 
+/**
+ * diff をローカルへ適用し、必要なら id_maps（cid→正規ID）も反映した LocalStore を返す。
+ */
 function applyDiffToLocal(local: LocalStore, diff: ServerDiffResponse): LocalStore {
   // 現状のローカルを Map 化
   const calMap = indexBy(local.calendars, "calendar_id");
@@ -73,8 +89,42 @@ function applyDiffToLocal(local: LocalStore, diff: ServerDiffResponse): LocalSto
   for (const i of diff.upserts.instances || []) {
     const prev = instMap.get(i.instance_id);
     if (!prev || newer(i.updated_at ?? null, (prev as any)?.updated_at ?? null)) {
-      if (!(i as any).deleted_at) instMap.set(i.instance_id, i as EventInstance);
-      else instMap.delete(i.instance_id);
+      if (!(i as any).deleted_at) {
+        const next = { ...(i as EventInstance) };
+        // occurrence_key が無ければ補完
+        if (!next.occurrence_key) next.occurrence_key = computeOccurrenceKey(next);
+        instMap.set(i.instance_id, next);
+      } else {
+        instMap.delete(i.instance_id);
+      }
+    }
+  }
+
+  // ★ cid_ulid → event_id の置換（id_maps）
+  const maps = diff.id_maps ?? [];
+  if (maps.length) {
+    // event 単位の置換のみを想定
+    const cidToReal = new Map<string, string>();
+    for (const m of maps) {
+      if (m.entity === "event" && m.cid_ulid && m.event_id) {
+        cidToReal.set(m.cid_ulid, m.event_id);
+      }
+    }
+    if (cidToReal.size) {
+      for (const inst of instMap.values()) {
+        // 置換候補を分解してから ?? で選ぶ（TSの '??' と '&&' 混在回避）
+        const byEvent = cidToReal.get((inst as any).event_id as string);
+        const byCid = (inst as any).cid_ulid
+          ? cidToReal.get((inst as any).cid_ulid as string)
+          : undefined;
+        const real = byEvent ?? byCid;
+
+        if (real) {
+          (inst as any).cid_ulid = null;           // 一時IDはクリア（任意）
+          (inst as any).event_id = real;           // 正規IDへ置換
+          (inst as any).occurrence_key = computeOccurrenceKey(inst);
+        }
+      }
     }
   }
 
@@ -112,7 +162,7 @@ export async function runIncrementalSync(fetchServerDiff: FetchServerDiff) {
   // 2) サーバから差分を取得
   const diff = await fetchServerDiff(since);
 
-  // 3) ローカルへマージ
+  // 3) ローカルへマージ（cid→正規ID 置換もここで）
   const merged = applyDiffToLocal(local, diff);
 
   // 4) 保存
@@ -123,7 +173,12 @@ export async function runIncrementalSync(fetchServerDiff: FetchServerDiff) {
 
   if (__DEV__) {
     // eslint-disable-next-line no-console
-    console.log("[sync] merged instances:", merged.instances.length, "cursor:", merged.lastSyncCursor);
+    console.log(
+      "[sync]",
+      "instances:", merged.instances.length,
+      "cursor:", merged.lastSyncCursor,
+      "id_maps:", (diff.id_maps?.length ?? 0)
+    );
   }
 
   return merged;
@@ -150,5 +205,7 @@ export async function exampleFetchServerDiff(since: string | null): Promise<Serv
       calendars: [],
       instances: [],
     },
+    // 例: オフライン作成で cid=... が event_id=... に確定したとき
+    // id_maps: [{ entity: "event", cid_ulid: "01H...CID", event_id: "01J...REAL" }],
   };
 }

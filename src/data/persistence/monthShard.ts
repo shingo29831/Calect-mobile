@@ -1,10 +1,11 @@
-﻿import RNFS from "react-native-fs";
+﻿// src/data/persistence/monthShard.ts
+import RNFS from "react-native-fs";
 import dayjs from "../../lib/dayjs";
 import type { EventInstance } from "../../api/types";
 import { fromUTC, startOfLocalDay, endOfLocalDay } from "../../utils/time";
 
 // 例: /files/calect/months/2025-03.json
-const DIR = `${RNFS.DocumentDirectoryPath}/calect/months`;
+export const MONTHS_DIR = `${RNFS.DocumentDirectoryPath}/calect/months`;
 
 const memMonthCache = new Map<string, EventInstance[]>(); // "YYYY-MM" -> instances[]
 const loading = new Map<string, Promise<void>>();
@@ -13,15 +14,26 @@ const loading = new Map<string, Promise<void>>();
 export const monthKeyFromISO = (iso: string) => dayjs(iso).format("YYYY-MM");
 
 /** 月ファイルパス */
-const fileForMonth = (yyyyMM: string) => `${DIR}/${yyyyMM}.json`;
+const fileForMonth = (yyyyMM: string) => `${MONTHS_DIR}/${yyyyMM}.json`;
 
 async function ensureDir() {
-  if (!(await RNFS.exists(DIR))) await RNFS.mkdir(DIR);
+  if (!(await RNFS.exists(MONTHS_DIR))) await RNFS.mkdir(MONTHS_DIR);
 }
 
 /** 月がキャッシュ済みかどうか（存在チェックのみ） */
 export function hasMonthInCache(yyyyMM: string) {
   return memMonthCache.has(yyyyMM);
+}
+
+/** ――― ユニーク判定（occurrence_key > instance_id > event_id@@start_at）――― */
+function instanceKey(x: Pick<EventInstance, "instance_id" | "event_id" | "start_at" | "occurrence_key">) {
+  return (x as any).occurrence_key ?? (x as any).instance_id ?? `${x.event_id}@@${x.start_at}`;
+}
+function mergeUniqueByKey(existing: EventInstance[], adds: EventInstance[]) {
+  const m = new Map<string, EventInstance>();
+  for (const r of existing) m.set(instanceKey(r), r);
+  for (const r of adds) m.set(instanceKey(r), r);
+  return Array.from(m.values());
 }
 
 /** 月の読み込み（メモリキャッシュ＋ファイル：新パスのみ） */
@@ -88,6 +100,20 @@ export async function upsertMonthInstances(yyyyMM: string, rows: EventInstance[]
   await RNFS.writeFile(path, JSON.stringify(rows), "utf8");
 }
 
+/** 追加配列をマージして保存（ユニーク判定付き） */
+export async function upsertMonthInstancesMerged(yyyyMM: string, adds: EventInstance[]) {
+  await ensureDir();
+  const current = await getMonthInstances(yyyyMM);
+  const merged = mergeUniqueByKey(current, adds);
+  await upsertMonthInstances(yyyyMM, merged);
+}
+
+/** 単一インスタンスを該当月へ追加（ユニーク判定付き） */
+export async function upsertSingleInstance(inst: EventInstance) {
+  const ym = monthKeyFromISO(inst.start_at);
+  await upsertMonthInstancesMerged(ym, [inst]);
+}
+
 /** 複数日（YYYY-MM-DD[]）の結果をまとめて返す（必要月は自動ロード） */
 export async function getByDatesWithEnsure(dates: string[]): Promise<Record<string, EventInstance[]>> {
   const months = Array.from(new Set(dates.map((d) => d.slice(0, 7))));
@@ -95,4 +121,24 @@ export async function getByDatesWithEnsure(dates: string[]): Promise<Record<stri
   const out: Record<string, EventInstance[]> = {};
   for (const d of dates) out[d] = getInstancesForDate(d);
   return out;
+}
+
+/** （任意ユーティリティ）cid→event_id の置換を月ファイルにも反映 */
+export async function applyEventIdMappingInMonths(m: Map<string, string>, targetMonths: string[]) {
+  if (!m.size) return;
+  await ensureMonths(targetMonths);
+  for (const ym of targetMonths) {
+    const arr = await getMonthInstances(ym);
+    let changed = false;
+    for (const it of arr) {
+      const real = m.get((it as any).event_id as string) || ((it as any).cid_ulid && m.get((it as any).cid_ulid));
+      if (real) {
+        (it as any).cid_ulid = null;
+        (it as any).event_id = real;
+        (it as any).occurrence_key = `${real}@@${it.start_at}`;
+        changed = true;
+      }
+    }
+    if (changed) await upsertMonthInstances(ym, arr);
+  }
 }
