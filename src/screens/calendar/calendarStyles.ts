@@ -61,24 +61,6 @@ export const styles = StyleSheet.create({
     paddingRight: SIDE_PAD,
   },
 
-  // 任意の補助罫線（absolute で重ねる→高さに影響しない）
-  gridTopLine: {
-    position: 'absolute',
-    top: 0,
-    left: SIDE_PAD,
-    right: SIDE_PAD,
-    height: HAIR_SAFE,
-    backgroundColor: LINE_COLOR,
-  },
-  gridLeftLine: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: SIDE_PAD,
-    width: LINE_W,
-    backgroundColor: LINE_COLOR,
-  },
-
   // CalendarList の直親。縦余白ゼロで高さ汚さない
   gridInner: {
     paddingTop: 0,
