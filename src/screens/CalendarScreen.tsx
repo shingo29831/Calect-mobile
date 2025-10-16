@@ -663,9 +663,6 @@ export default function CalendarScreen({ navigation }: Props) {
 
       {/* カレンダー */}
       <View style={[styles.gridBlock, { backgroundColor: 'transparent' }]} onLayout={(e) => setGridH(Math.round(e.nativeEvent.layout.height))}>
-        <View style={styles.gridTopLine} />
-        <View style={styles.gridLeftLine} />
-
         <View style={[styles.gridInner, { backgroundColor: 'transparent' }]} onLayout={(e) => setInnerW(e.nativeEvent.layout.width)}>
           {/* 月タイトル */}
           <View style={{ height: MONTH_TITLE_HEIGHT, alignItems: 'center', justifyContent: 'center' }}>
@@ -817,13 +814,26 @@ export default function CalendarScreen({ navigation }: Props) {
         <Text style={{ color: theme.textPrimary, fontSize: 28, lineHeight: 28, marginTop: -2 }}>＋</Text>
       </Pressable>
 
-      {/* 追加ボトムシート（スクロール領域拡大 + 先頭のみドラッグ奪取） */}
+      {/* 追加ボトムシート（※ここを修正：オーバーレイとシートを分離。シートをタップしても閉じない） */}
       {addVisible && (
-        <Pressable
-          onPress={closeAddSheet}
-          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.35)' }}
+        <View
+          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+          pointerEvents="box-none"
         >
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          {/* オーバーレイだけが閉じる */}
+          <Pressable
+            onPress={closeAddSheet}
+            style={StyleSheet.absoluteFillObject}
+          >
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }} />
+          </Pressable>
+
+          {/* シート本体（タップしても閉じない） */}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={{ flex: 1 }}
+            pointerEvents="box-none"
+          >
             <Animated.View
               {...panResponder.panHandlers}
               style={{
@@ -905,11 +915,6 @@ export default function CalendarScreen({ navigation }: Props) {
                         }}
                       />
                     </View>
-
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Text style={{ color: theme.textPrimary, fontWeight: '700' }}>All day</Text>
-                      <Switch value={formAllDay} onValueChange={onToggleAllDay} />
-                    </View>
                   </View>
 
                   {/* ===== 日付（ポップアップ） ===== */}
@@ -948,6 +953,10 @@ export default function CalendarScreen({ navigation }: Props) {
                   </View>
 
                   {/* ===== 時刻入力（HH:mm） ===== */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={{ color: theme.textPrimary, fontWeight: '700' }}>All day</Text>
+                    <Switch value={formAllDay} onValueChange={onToggleAllDay} />
+                  </View>
                   {!formAllDay && (
                     <View style={{ flexDirection: 'row', gap: 12 }}>
                       <View style={{ flex: 1 }}>
@@ -1187,7 +1196,7 @@ export default function CalendarScreen({ navigation }: Props) {
               </View>
             </Animated.View>
           </KeyboardAvoidingView>
-        </Pressable>
+        </View>
       )}
     </View>
   );
