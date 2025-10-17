@@ -75,7 +75,7 @@ const DARK: Theme = {
   daySun: '#ef4444',
   daySat: '#60a5fa',
   selectedDayBg: 'rgba(96,165,250,0.18)',
-  todayNumber: '#60a5fa',
+  todayNumber: '#e4a982ff',
   eventDefaultFg: '#60a5fa',
   eventDefaultBg: 'rgba(96,165,250,0.12)',
   shadow: '#000000',

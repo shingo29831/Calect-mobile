@@ -48,6 +48,30 @@ import { useAppTheme } from '../../../theme';
 type Props = NativeStackScreenProps<RootStackParamList, 'Calendar'>;
 type SortMode = 'span' | 'start';
 
+/* =======================
+ * 今日文字列を日付またぎで更新するフック
+ * ======================= */
+function useTodayTick(fmt: string = 'YYYY-MM-DD') {
+  const [todayStr, setTodayStr] = useState(() => dayjs().format(fmt));
+
+  useEffect(() => {
+    let timer: any;
+    const schedule = () => {
+      const now = dayjs();
+      const next = now.add(1, 'day').startOf('day');
+      const ms = Math.max(1000, next.diff(now, 'millisecond')); // 安全に最小1秒
+      timer = setTimeout(() => {
+        setTodayStr(dayjs().format(fmt));
+        schedule();
+      }, ms);
+    };
+    schedule();
+    return () => timer && clearTimeout(timer);
+  }, [fmt]);
+
+  return todayStr;
+}
+
 /* --------- 型とダイヤルコンポーネント（省略不可なのでこのまま） --------- */
 type ServerDocV2 = {
   version: number;
@@ -253,7 +277,7 @@ const MinuteDial: React.FC<MinuteDialProps> = memo(({
 
   const handleRelease = useCallback((evt: any) => {
     const { locationX, locationY } = evt.nativeEvent;
-    const m = pickFromXY(locationX, locationY);
+    const m = pickFromXY(locationX, locationY); // ← locationY を正しく渡す
     onConfirm(m);
   }, [pickFromXY, onConfirm]);
 
@@ -367,6 +391,9 @@ function StatusBadge({ text }: { text: string }) {
 export default function CalendarScreen({ navigation }: Props) {
   const theme = useAppTheme();
 
+  // ★ 今日（YYYY-MM-DD）を 0:00 で更新
+  const todayStr = useTodayTick('YYYY-MM-DD');
+
   // ===== スキーマ・プロフィール読み込み =====
   const [{ server, prefs }, setAppData] = useState<{ server?: ServerDocV2; prefs?: ClientPrefsV1 }>({});
   const [schemaReady, setSchemaReady] = useState(false);
@@ -426,8 +453,7 @@ export default function CalendarScreen({ navigation }: Props) {
   }, [prefs]);
 
   // ===== 画面状態 =====
-  const today = dayjs().format('YYYY-MM-DD');
-  const [selected, setSelected] = useState<string>(today);
+  const [selected, setSelected] = useState<string>(todayStr);
   const [currentMonth, setCurrentMonth] = useState<string>(dayjs().format('YYYY-MM'));
   const monthLabel = useMemo(() => dayjs(currentMonth + '-01').format('YYYY年M月'), [currentMonth]); // ← ヘッダー表示用
   const [sortMode, setSortMode] = useState<SortMode>('span');
@@ -463,7 +489,7 @@ export default function CalendarScreen({ navigation }: Props) {
 
   // DayEventsSheet
   const [sheetVisible, setSheetVisible] = useState(false);
-  const [sheetDate, setSheetDate] = useState<string>(today);
+  const [sheetDate, setSheetDate] = useState<string>(todayStr);
   const [sheetItems, setSheetItems] = useState<any[]>([]);
   const sheetY = useRef(new Animated.Value(0)).current;
 
@@ -881,7 +907,7 @@ export default function CalendarScreen({ navigation }: Props) {
         dayContainer: { flex: 0, padding: 0, margin: 0, alignItems: 'stretch', justifyContent: 'flex-start', width: undefined, backgroundColor: 'transparent' },
       },
       'stylesheet.day.basic': { base: { flex: 0, width: undefined, margin: 0, padding: 0, alignItems: 'stretch', justifyContent: 'flex-start', backgroundColor: 'transparent' } },
-      'stylesheet.calendar-list.main': { calendar: { paddingLeft: 0, paddingRight: 0, paddingTop: 0, marginTop: 0, backgroundColor: 'transparent' } },
+        'stylesheet.calendar-list.main': { calendar: { paddingLeft: 0, paddingRight: 0, paddingTop: 0, marginTop: 0, backgroundColor: 'transparent' } },
       'stylesheet.calendar.header': { header: { marginBottom: 0, paddingVertical: 0, height: 0, backgroundColor: 'transparent' } },
     };
   }, [bgImageUri, theme.appBg]);
@@ -897,8 +923,8 @@ export default function CalendarScreen({ navigation }: Props) {
           style={{
             height: cellH,
             overflow: 'hidden',
-            // 今日だけ薄い青背景
-            backgroundColor: dateStr === today
+            // 今日だけ薄い青背景（todayStr を使用）
+            backgroundColor: dateStr === todayStr
               ? (theme.mode === 'dark' ? 'rgba(96,165,250,0.18)' : 'rgba(37,99,235,0.12)')
               : 'transparent',
             borderRadius: 6,
@@ -919,7 +945,7 @@ export default function CalendarScreen({ navigation }: Props) {
         </View>
       );
     },
-    [colWBase, colWLast, cellH, eventsByDate, overflowByDate, dbReady]
+    [colWBase, colWLast, cellH, eventsByDate, overflowByDate, dbReady, todayStr, theme.mode]
   );
 
   // 先読み（前後 -2,-1,+1,+2 ヶ月）
@@ -1154,6 +1180,7 @@ export default function CalendarScreen({ navigation }: Props) {
                 theme={calendarTheme as any}
                 contentContainerStyle={{ alignItems: 'flex-start', paddingHorizontal: 0, paddingTop: 0 }}
                 dayComponent={renderDay as any}
+                extraData={todayStr}  // ★ これが再描画トリガー
               />
             )}
           </View>
@@ -1760,4 +1787,3 @@ const overlayStyles = StyleSheet.create({
     maxWidth: '100%',
   },
 });
-
