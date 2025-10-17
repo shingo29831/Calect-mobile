@@ -429,6 +429,7 @@ export default function CalendarScreen({ navigation }: Props) {
   const today = dayjs().format('YYYY-MM-DD');
   const [selected, setSelected] = useState<string>(today);
   const [currentMonth, setCurrentMonth] = useState<string>(dayjs().format('YYYY-MM'));
+  const monthLabel = useMemo(() => dayjs(currentMonth + '-01').format('YYYY年M月'), [currentMonth]); // ← ヘッダー表示用
   const [sortMode, setSortMode] = useState<SortMode>('span');
 
   const [selectedEntityId, setSelectedEntityId] = useState<string>('org_me');
@@ -628,11 +629,11 @@ export default function CalendarScreen({ navigation }: Props) {
     ensureEndTimeNotBeforeStart(startTime, endTime);
   }, [startTime, endTime, ensureEndTimeNotBeforeStart]);
 
-  // グリッド高さ計算
+  // グリッド高さ計算（★ 月タイトルを消したので差し引かない）
   const pageHeight = useMemo(() => {
     if (gridH <= 0) return 0;
     const weekH = Math.max(weekHeaderH, 24);
-    const usable = Math.max(0, gridH - MONTH_TITLE_HEIGHT - weekH);
+    const usable = Math.max(0, gridH - weekH); // ← MONTH_TITLE_HEIGHT を引かない
     const cell = Math.max(1, Math.floor(usable / ROWS));
     return cell * ROWS;
   }, [gridH, weekHeaderH]);
@@ -774,9 +775,34 @@ export default function CalendarScreen({ navigation }: Props) {
     }
   }, [currentMonth]);
 
-  // 背景などヘッダー設定…
+
+  // FIRST_DAY=0(日) → Tue=2,  FIRST_DAY=1(月) → Tue=1
+  const tueStartCol = useMemo(() => ((2 - FIRST_DAY + 7) % 7), [FIRST_DAY]);
+
+  // オーバレイの左位置と幅（火～木＝3列ぶん）
+  const nameOverlayLeft = useMemo(() => tueStartCol * colWBase, [tueStartCol, colWBase]);
+  const nameOverlayWidth = useMemo(() => colWBase * 3, [colWBase]);
+
+  // ▼ オーバレイの縦位置：カレンダーグリッドの最下段 DayCell の中央
+  const nameOverlayTop = useMemo(() => {
+    if (pageHeight <= 0 || cellH <= 0) return 0;
+    // カレンダー本体は weekHeaderH の直下に始まる
+    const gridTop = weekHeaderH;
+    // 最下段(ROWS-1)のセルの上端 + セル高さの1/2 = セル中央
+    const centerY = gridTop + (ROWS - 1) * cellH + Math.floor(cellH / 2);
+    // ピルの見た目高さ（約36px）を想定して半分引いて中央合わせ（必要に応じて微調整）
+    return Math.max(weekHeaderH, centerY - 18);
+  }, [weekHeaderH, pageHeight, cellH]);
+
+
+  // ▼ 最下段（6行目= ROWS-1）の“日付の上”あたりに置く
+  const bottomRowTop = useMemo(
+    () => weekHeaderH + (cellH * (ROWS - 1)) + 4, // +4 でセル内に少し入れる
+    [weekHeaderH, cellH]
+  );
+
+  // ===== ヘッダー設定（★ タイトルは「月」、カレンダー名は表示しない） =====
   useEffect(() => {
-    const showEmoji = selectedEntity.kind === 'group';
     const headerLeft = () => (
       <Pressable onPress={left.openDrawer} hitSlop={12} style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
         <View style={{ gap: 4 }}>
@@ -801,22 +827,16 @@ export default function CalendarScreen({ navigation }: Props) {
     (navigation as any).setOptions({
       headerStyle: { backgroundColor: theme.appBg },
       headerTitleAlign: 'left',
+      // ★ 月を表示（例：2025年10月）
       headerTitle: () => (
-        <View style={styles.headerTitleRow}>
-          {showEmoji ? (
-            <View style={[styles.headerEmojiCircle, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <Text style={styles.headerEmojiText}>👥</Text>
-            </View>
-          ) : null}
-          <Text style={[styles.headerTitleText, { color: theme.textPrimary }]} numberOfLines={1}>
-            {selectedEntity.label}
-          </Text>
-        </View>
+        <Text style={{ fontSize: 18, fontWeight: '800', color: theme.textPrimary }}>
+          {monthLabel}
+        </Text>
       ),
       headerLeft,
       headerRight,
     });
-  }, [navigation, selectedEntity, left.openDrawer, right.openDrawer, theme]);
+  }, [navigation, left.openDrawer, right.openDrawer, theme, monthLabel]);
 
   const marked = useMemo(() => ({ [selected]: { selected: true } }), [selected]);
 
@@ -1053,67 +1073,47 @@ export default function CalendarScreen({ navigation }: Props) {
       {/* カレンダー */}
       <View style={[styles.gridBlock, { backgroundColor: 'transparent' }]} onLayout={(e) => setGridH(Math.round(e.nativeEvent.layout.height))}>
         <View style={[styles.gridInner, { backgroundColor: 'transparent' }]} onLayout={(e) => setInnerW(e.nativeEvent.layout.width)}>
-          {/* 月タイトル */}
-          <View style={{ height: MONTH_TITLE_HEIGHT, alignItems: 'center', justifyContent: 'center' }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              {/* ★ 長押しでローカルリセット */}
-              <Pressable
-                onLongPress={() => {
-                  Alert.alert(
-                    'ローカルデータのリセット',
-                    '端末内のスナップショット／月シャード／キューを全て削除します。よろしいですか？',
-                    [
-                      { text: 'キャンセル', style: 'cancel' },
-                      { text: 'リセット', style: 'destructive', onPress: () => runResetLocal() },
-                    ],
-                  );
-                }}
-                hitSlop={10}
-              >
-                <Text style={[styles.monthTitle, { color: theme.textPrimary }]}>
-                  {dayjs(currentMonth + '-01').format('YYYY MMM')}
-                </Text>
-              </Pressable>
-
-              {/* ソートピル */}
-              <View style={[styles.sortPills, { backgroundColor: 'transparent' }]}>
-                <Pressable
-                  onPress={() => setSortMode('span')}
-                  style={[
-                    styles.pill,
-                    { backgroundColor: theme.surface, borderColor: theme.border, borderWidth: HAIR_SAFE },
-                    sortMode === 'span' && { backgroundColor: theme.accent, borderColor: theme.accent }
-                  ]}
-                >
-                  <Text style={[
-                    styles.pillText,
-                    { color: theme.textSecondary, fontWeight: '700' },
-                    sortMode === 'span' && { color: theme.accentText }
-                  ]}>Span</Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={() => setSortMode('start')}
-                  style={[
-                    styles.pill,
-                    { backgroundColor: theme.surface, borderColor: theme.border, borderWidth: HAIR_SAFE },
-                    sortMode === 'start' && { backgroundColor: theme.accent, borderColor: theme.accent }
-                  ]}
-                >
-                  <Text style={[
-                    styles.pillText,
-                    { color: theme.textSecondary, fontWeight: '700' },
-                    sortMode === 'start' && { color: theme.accentText }
-                  ]}>Start</Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
+          {/* ▼▼▼ 月タイトルは削除（内部に描画しない） ▼▼▼ */}
 
           {/* 曜日ヘッダ */}
           <View onLayout={(e) => setWeekHeaderH(Math.round(e.nativeEvent.layout.height))}>
             {innerW > 0 ? <WeekHeader colWBase={colWBase} colWLast={colWLast} /> : null}
           </View>
+
+          {/* ★ カレンダー名オーバレイ（最下段 DayCell の中央 / Tue-Thu に跨る） */}
+          {innerW > 0 && pageHeight > 0 && (
+            <View
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                left: nameOverlayLeft + 6,
+                top: nameOverlayTop,
+                width: Math.max(0, nameOverlayWidth - 12),
+                zIndex: 1000,
+              }}
+            >
+              <View
+                style={[
+                  overlayStyles.namePillTop,
+                  {
+                    backgroundColor: theme.overLayBg,
+                    borderColor: theme.border,
+                    shadowColor: theme.shadow ?? '#000',
+                  },
+                ]}
+              >
+                <Text
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  style={{ color: theme.textPrimary, fontSize: 18,textAlign: 'center' }}
+                >
+                  {selectedEntity.label}
+                </Text>
+              </View>
+            </View>
+          )}
+
+
 
           {/* CalendarList */}
           <View style={{ overflow: 'hidden', backgroundColor: 'transparent' }}>
@@ -1215,7 +1215,7 @@ export default function CalendarScreen({ navigation }: Props) {
         hitSlop={10}
         style={{
           position: 'absolute', right: 18, bottom: 24, width: 56, height: 56, borderRadius: 28,
-          backgroundColor: theme.surface, alignItems: 'center', justifyContent: 'center',
+          backgroundColor: theme.overLayBg, alignItems: 'center', justifyContent: 'center',
           shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 4 },
           elevation: 6, borderWidth: HAIR_SAFE, borderColor: theme.border,
         }}
@@ -1712,3 +1712,42 @@ export default function CalendarScreen({ navigation }: Props) {
     </View>
   );
 }
+
+/* === 下部オーバレイ専用の軽量スタイル === */
+const overlayStyles = StyleSheet.create({
+  // 旧：下部中央オーバレイ用（残してOK / どこからも使っていなければ無視されます）
+  nameOverlayWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 16,
+    alignItems: 'center',
+  },
+  namePill: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    opacity: 0.98,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
+    textAlign: 'center',
+  },
+
+  // 新：最下段の火水木「日付の上」に載せる用
+  namePillTop: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    opacity: 0.98,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+    maxWidth: '100%',
+  },
+});
+

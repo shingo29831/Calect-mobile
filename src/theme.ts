@@ -2,6 +2,7 @@
 import { useColorScheme } from 'react-native';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
+
 export type Theme = {
   mode: 'light' | 'dark';
   // surfaces
@@ -24,8 +25,11 @@ export type Theme = {
   daySat: string;
   // event defaults
   eventDefaultFg: string;
-  eventDefaultBg: string; // rgba 縺ｪ縺ｩOK
-  sheetBackdrop: string; // 繝懊ヨ繝繧ｷ繝ｼ繝育畑縺ｮ蜊企乗・閭梧勹
+  eventDefaultBg: string; // rgba OK
+  sheetBackdrop: string;  // シート用の背景スクラム
+  // shadow
+  shadow: string;         // 影色（プラットフォーム共通のベース色）
+  overLayBg: string;
 };
 
 const LIGHT: Theme = {
@@ -46,6 +50,8 @@ const LIGHT: Theme = {
   daySat: '#3b82f6',
   eventDefaultFg: '#2563eb',
   eventDefaultBg: 'rgba(37, 99, 235, 0.12)',
+  shadow: '#000000',
+  overLayBg: 'rgba(255,255,255,0.94)',
 };
 
 const DARK: Theme = {
@@ -66,9 +72,11 @@ const DARK: Theme = {
   daySat: '#60a5fa',
   eventDefaultFg: '#60a5fa',
   eventDefaultBg: 'rgba(96,165,250,0.12)',
+  shadow: '#000000',
+  overLayBg: 'rgba(36, 50, 82, 0.9)',
 };
 
-/** RN縺ｮ ColorSchemeName 縺檎腸蠅・↓繧医▲縺ｦ undefined 繧貞性繧縺溘ａ繧ｬ繝ｼ繝・*/
+/** RN の ColorSchemeName は null のことがあるので正規化 */
 function normalizeScheme(
   s: 'light' | 'dark' | null | undefined
 ): 'light' | 'dark' | null {
@@ -85,7 +93,7 @@ export function getTheme(
 }
 
 export function useAppTheme(preferred?: ThemeMode): Theme {
-  // useColorScheme(): ColorSchemeName => 'light' | 'dark' | null・育腸蠅・↓繧医ｊ undefined 蝙九′豺ｷ蜈･縺吶ｋ縺薙→縺後≠繧具ｼ・
+  // useColorScheme(): 'light' | 'dark' | null（undefined の可能性に注意）
   const sysRaw = useColorScheme();
   const sys = normalizeScheme(sysRaw as 'light' | 'dark' | null | undefined);
   return getTheme(preferred ?? 'system', sys);
