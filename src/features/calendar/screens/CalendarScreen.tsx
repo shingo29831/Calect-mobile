@@ -893,7 +893,17 @@ export default function CalendarScreen({ navigation }: Props) {
       const dbSegs = dbReady ? (eventsByDate[dateStr] ?? []) : [];
       const moreDb = dbReady ? (overflowByDate[dateStr] ?? 0) : 0;
       return (
-        <View style={{ height: cellH, overflow: 'hidden', backgroundColor: 'transparent' }}>
+        <View
+          style={{
+            height: cellH,
+            overflow: 'hidden',
+            // 今日だけ薄い青背景
+            backgroundColor: dateStr === today
+              ? (theme.mode === 'dark' ? 'rgba(96,165,250,0.18)' : 'rgba(37,99,235,0.12)')
+              : 'transparent',
+            borderRadius: 6,
+          }}
+        >
           <DayCell
             date={date}
             state={state}

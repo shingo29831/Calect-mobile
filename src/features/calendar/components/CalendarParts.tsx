@@ -36,7 +36,7 @@ export const HEADER_HEIGHT = 36;
 export const MONTH_TITLE_HEIGHT = 44;
 export const ROWS = 6; // showSixWeeks=true
 export const FIRST_DAY = 0;
-// 選択日の背景（実描画は Theme の accent を元に計算）
+// 選択日の背景（実描画は Theme の selectedDayBg を使用）
 export const SELECTED_BG = 'rgba(96,165,250,0.14)';
 export const SIDE_PAD = 8;
 export const SEP_H = LINE_W;
@@ -156,26 +156,36 @@ export const DayCell = React.memo(function DayCell({
   const isSelected = !!marking?.selected;
   const isDisabled = state === 'disabled';
 
+  // 一貫したTZで“今日”を判定
+  const dateStr = date.dateString;
+  const todayStr = (dayjs as any).tz
+    ? dayjs().tz(DISPLAY_TZ).format('YYYY-MM-DD')
+    : dayjs().format('YYYY-MM-DD');
+  const isToday = dateStr === todayStr;
+
   const wd = (dayjs as any).tz
-    ? dayjs.tz(date.dateString, DISPLAY_TZ).day()
-    : dayjs(date.dateString).day();
+    ? dayjs.tz(dateStr, DISPLAY_TZ).day()
+    : dayjs(dateStr).day();
 
   const colIndex = (wd - FIRST_DAY + 7) % 7;
-
-  const dayColor = isDisabled
-    ? theme.dayDisabled
-    : wd === 0
-    ? theme.daySun
-    : wd === 6
-    ? theme.daySat
-    : theme.dayWeekday;
-
   const isLast = colIndex === 6;
   const colW = isLast ? colWLast : colWBase;
 
-  const barsTop = 6 + (DAY_FONT + 2) + 6;
-  const cellBg = isSelected ? `${theme.accent}24` : 'transparent';
+  // 数字の色: 今日なら専用色 / それ以外は曜日ロジック
+  const defaultDayColor =
+    isDisabled
+      ? theme.dayDisabled
+      : wd === 0
+      ? theme.daySun
+      : wd === 6
+      ? theme.daySat
+      : theme.dayWeekday;
+  const dayNumberColor = isToday ? theme.todayNumber : defaultDayColor;
 
+  // 選択日の背景はテーマの薄青
+  const cellBg = isSelected ? theme.selectedDayBg : 'transparent';
+
+  const barsTop = 6 + (DAY_FONT + 2) + 6;
   const visibleSlots = dayEvents.slice(0, MAX_BARS_PER_DAY);
   const computedMore = moreCount > 0 ? moreCount : Math.max(0, dayEvents.length - MAX_BARS_PER_DAY);
 
@@ -188,6 +198,7 @@ export const DayCell = React.memo(function DayCell({
           width: colW,
           height: cellH,
           backgroundColor: cellBg,
+          borderRadius: isSelected ? 6 : 0,
         },
       ]}
       android_ripple={{ color: `${theme.accent}2E` }}
@@ -239,9 +250,9 @@ export const DayCell = React.memo(function DayCell({
         />
       )}
 
-      {/* 日付番号 */}
+      {/* 日付番号（今日だけ数字を青に） */}
       <View pointerEvents="none" style={styles.topCenterWrap}>
-        <Text style={[styles.dayNumber, { color: dayColor }]}>{date.day}</Text>
+        <Text style={[styles.dayNumber, { color: dayNumberColor }]}>{date.day}</Text>
       </View>
 
       {/* イベントバー */}

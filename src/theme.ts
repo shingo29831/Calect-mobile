@@ -23,6 +23,8 @@ export type Theme = {
   dayWeekday: string;
   daySun: string;
   daySat: string;
+  selectedDayBg: string;
+  todayNumber: string;   
   // event defaults
   eventDefaultFg: string;
   eventDefaultBg: string; // rgba OK
@@ -48,6 +50,8 @@ const LIGHT: Theme = {
   dayWeekday: '#0f172a',
   daySun: '#ef4444',
   daySat: '#3b82f6',
+  selectedDayBg: 'rgba(37, 99, 235, 0.12)',
+  todayNumber: '#2563eb',
   eventDefaultFg: '#2563eb',
   eventDefaultBg: 'rgba(37, 99, 235, 0.12)',
   shadow: '#000000',
@@ -70,6 +74,8 @@ const DARK: Theme = {
   dayWeekday: '#e2e8f0',
   daySun: '#ef4444',
   daySat: '#60a5fa',
+  selectedDayBg: 'rgba(96,165,250,0.18)',
+  todayNumber: '#60a5fa',
   eventDefaultFg: '#60a5fa',
   eventDefaultBg: 'rgba(96,165,250,0.12)',
   shadow: '#000000',
