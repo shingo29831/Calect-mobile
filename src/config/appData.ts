@@ -143,8 +143,8 @@ export const prefs: ClientPrefsV1 | undefined = {
     // ・井ｾ具ｼ咾AL_LOCAL_DEFAULT・・
     CAL_LOCAL_DEFAULT: {
     //   // 笆ｼ 螂ｽ縺阪↑逕ｻ蜒酋RL縺ｫ蟾ｮ縺玲崛縺医※OK・・ttps/file/content 繧ｹ繧ｭ繝ｼ繝蟇ｾ蠢懶ｼ・
-    //   background_image:
-    //     'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?q=80&w=1600&auto=format&fit=crop',
+      background_image:
+        'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?q=80&w=1600&auto=format&fit=crop',
       icon_image_path:
         'https://images.unsplash.com/photo-1544006659-f0b21884ce1d?q=80&w=100&auto=format&fit=crop',
       event_style_default: {

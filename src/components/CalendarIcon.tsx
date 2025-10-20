@@ -1,8 +1,8 @@
 ﻿// src/components/CalendarIcon.tsx
 import React from 'react';
 import { Image, View, Text } from 'react-native';
-import { HAIR_SAFE } from '../screens/CalendarParts';
-import { getCalendarIconPath } from '../store/appData';
+import { HAIR_SAFE } from '../features/calendar/components/CalendarParts';
+import { getCalendarIconPath } from '../config/appData';
 
 type Props = {
   calendarId?: string | null;

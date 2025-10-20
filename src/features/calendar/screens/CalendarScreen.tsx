@@ -936,7 +936,7 @@ export default function CalendarScreen({ navigation }: Props) {
             colWLast={colWLast}
             cellH={cellH}
             dayEvents={dbSegs}
-            hideRightDivider={false}
+            hideRightDivider={true}
             moreCount={moreDb}
           />
         </View>

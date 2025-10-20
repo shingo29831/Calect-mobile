@@ -98,7 +98,10 @@ export function WeekHeader({ colWBase, colWLast }: { colWBase: number; colWLast:
   const raw = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const labels = [...raw.slice(FIRST_DAY), ...raw.slice(0, FIRST_DAY)];
   return (
-    <View style={{ height: HEADER_HEIGHT, flexDirection: 'row' }}>
+    <View style={{ height: HEADER_HEIGHT, flexDirection: 'row' ,
+        borderColor: theme.lineColor, borderBottomWidth: 1
+        }}
+    >
       {labels.map((label, i) => {
         const weekIndex = (FIRST_DAY + i) % 7;
         const color =
@@ -114,12 +117,12 @@ export function WeekHeader({ colWBase, colWLast }: { colWBase: number; colWLast:
               height: HEADER_HEIGHT,
               alignItems: 'center',
               justifyContent: 'center',
-              borderRightWidth: isLast ? 0 : LINE_W,
-              borderBottomWidth: 0,
-              borderColor: theme.lineColor,
+            //   borderRightWidth: isLast ? 0 : 0,//LINE_W,
+            //   borderBottomWidth: 1,
+            //   borderColor: theme.lineColor,
             }}
           >
-            <Text style={{ fontSize: HEADER_FONT, fontWeight: '700', color }}>{label}</Text>
+            <Text style={{ fontSize: HEADER_FONT, fontWeight: '700', color ,}}>{label}</Text>
           </View>
         );
       })}
@@ -249,7 +252,7 @@ export const DayCell = React.memo(function DayCell({
         />
       )}
 
-      {/* 日付番号（今日だけ数字を青に） */}
+      {/* 日付番号 */}
       <View pointerEvents="none" style={styles.topCenterWrap}>
         <Text style={[styles.dayNumber, { color: dayNumberColor }]}>{date.day}</Text>
       </View>
