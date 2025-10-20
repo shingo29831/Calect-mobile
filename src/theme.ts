@@ -1,10 +1,10 @@
 ﻿// src/theme.ts
 import { useColorScheme } from 'react-native';
 
-export type ThemeMode = 'light' | 'dark' | 'system';
+export type ThemeMode = 'light' | 'dark' | 'custom'| 'system';
 
 export type Theme = {
-  mode: 'light' | 'dark';
+  mode: 'light' | 'dark' | 'custom';
   // surfaces
   appBg: string;
   surface: string;
@@ -24,7 +24,8 @@ export type Theme = {
   daySun: string;
   daySat: string;
   selectedDayBg: string;
-  todayNumber: string;   
+  todayNumber: string;
+  todayBg: string;
   // event defaults
   eventDefaultFg: string;
   eventDefaultBg: string; // rgba OK
@@ -52,6 +53,7 @@ const LIGHT: Theme = {
   daySat: '#3b82f6',
   selectedDayBg: 'rgba(37, 99, 235, 0.12)',
   todayNumber: '#2563eb',
+  todayBg: 'rgba(37,99,235,0.12)',
   eventDefaultFg: '#2563eb',
   eventDefaultBg: 'rgba(37, 99, 235, 0.12)',
   shadow: '#000000',
@@ -76,6 +78,7 @@ const DARK: Theme = {
   daySat: '#60a5fa',
   selectedDayBg: 'rgba(96,165,250,0.18)',
   todayNumber: '#e4a982ff',
+  todayBg: 'rgba(96,165,250,0.18)',
   eventDefaultFg: '#60a5fa',
   eventDefaultBg: 'rgba(96,165,250,0.12)',
   shadow: '#000000',

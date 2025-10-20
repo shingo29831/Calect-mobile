@@ -923,10 +923,7 @@ export default function CalendarScreen({ navigation }: Props) {
           style={{
             height: cellH,
             overflow: 'hidden',
-            // 今日だけ薄い青背景（todayStr を使用）
-            backgroundColor: dateStr === todayStr
-              ? (theme.mode === 'dark' ? 'rgba(96,165,250,0.18)' : 'rgba(37,99,235,0.12)')
-              : 'transparent',
+            backgroundColor: dateStr === todayStr ? theme.todayBg : 'transparent',
             borderRadius: 6,
           }}
         >
@@ -1752,7 +1749,6 @@ export default function CalendarScreen({ navigation }: Props) {
 
 /* === 下部オーバレイ専用の軽量スタイル === */
 const overlayStyles = StyleSheet.create({
-  // 旧：下部中央オーバレイ用（残してOK / どこからも使っていなければ無視されます）
   nameOverlayWrap: {
     position: 'absolute',
     left: 0,

@@ -158,9 +158,8 @@ export const DayCell = React.memo(function DayCell({
 
   // 一貫したTZで“今日”を判定
   const dateStr = date.dateString;
-  const todayStr = (dayjs as any).tz
-    ? dayjs().tz(DISPLAY_TZ).format('YYYY-MM-DD')
-    : dayjs().format('YYYY-MM-DD');
+  const todayStr = dayjs().format('YYYY-MM-DD');
+
   const isToday = dateStr === todayStr;
 
   const wd = (dayjs as any).tz
