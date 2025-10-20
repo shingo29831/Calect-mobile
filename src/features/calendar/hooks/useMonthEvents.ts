@@ -1,21 +1,45 @@
-﻿// src/features/calendar/hooks/useMonthEvents.ts
-import { useMemo } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import dayjs from '../../../lib/dayjs';
-import type { EventInstance } from '../../../api/types';
-import { listInstancesByDate } from '../../../store/db';
+import { loadServerDoc } from '../../../store/serverDoc';
+import { expandEventInstances, getOccurrenceTimes, isTimedOccurrence } from '../../../utils/eventTime';
 import { MAX_BARS_PER_DAY } from '../components/CalendarParts';
 
-type SortMode = 'span' | 'start';
+/** 旧 EventInstance 相当（表示に必要な最小プロパティのみ） */
+type EventInstance = {
+  /** 各発生回でユニーク */
+  instance_id: string;
+  event_id: string;
+  calendar_id?: string | null;
+  title: string;          // 必須（CalendarParts 側に合わせる）
+  summary?: string;
+  color?: string;
+  priority?: 'low' | 'normal' | 'high';
+  /** ISO8601（tzを含む瞬間）。並び・レーン割当はこれで判定 */
+  start_at: string;
+  end_at: string;
+};
 
 /** DayCell で使うイベント片（横バー1本分） */
 export type EventSegment = EventInstance & {
-  spanLeft: boolean;   // 前日にまたがっているなら左を角丸にしない
-  spanRight: boolean;  // 翌日にまたがっているなら右を角丸にしない
+  spanLeft: boolean;   // 前日にまたがっているなら左を角丸にしない（ここでは false）
+  spanRight: boolean;  // 翌日にまたがっているなら右を角丸にしない（ここでは false）
 };
+
+type SortMode = 'span' | 'start';
+
+/** 安定した instance_id を作る（event_id + date + start/end ISO を結合） */
+function makeInstanceId(
+  event_id: string,
+  occurrenceDate: string,
+  startISO: string,
+  endISO: string
+) {
+  return `${event_id}:${occurrenceDate}:${startISO}:${endISO}`;
+}
 
 /** 「同一」とみなすための簡易キー（暫定） */
 const keyOf = (ev: EventInstance) =>
-  `${String(ev.calendar_id ?? '')}|${String(ev.title ?? '')}|${String(ev.start_at ?? '')}|${String(ev.end_at ?? '')}`;
+  `${String(ev.calendar_id ?? '')}|${String(ev.title)}|${String(ev.start_at)}|${String(ev.end_at)}`;
 
 /** 並び順を作る（開始時刻 or 所要時間の長い順） */
 function makeSorter(sortMode: SortMode) {
@@ -73,54 +97,121 @@ function layoutIntoLanes(rows: EventInstance[], maxBars = MAX_BARS_PER_DAY): Eve
   return limited.map(({ __lane, ...seg }) => seg);
 }
 
-/**
- * 月表示用：各日付に EventSegment[] を割り付け、さらに溢れ件数（more）も返す
- *
- * @param monthDates YYYY-MM-DD[]（CalendarList で表示する 6×7=42 日など）
- * @param filterEventsByEntity 表示対象の Org/Group/ユーザーなどでフィルタ
- * @param sortMode 'span' | 'start'
- * @param refreshKey 依存に含めたい任意キー（外部更新トリガ用）
- */
+/** 月表示用：各日付に EventSegment[] を割り付け、さらに溢れ件数（more）も返す */
 export function useMonthEvents(
   monthDates: string[],
   filterEventsByEntity: (arr: any[]) => any[],
   sortMode: SortMode,
   refreshKey?: any
 ) {
-  return useMemo(() => {
-    const eventsByDate: Record<string, EventSegment[]> = {};
-    const overflowByDate: Record<string, number> = {};
+  const [eventsByDate, setEventsByDate] = useState<Record<string, EventSegment[]>>({});
+  const [overflowByDate, setOverflowByDate] = useState<Record<string, number>>({});
 
+  // 月範囲（拡張用に最小/最大を計算）
+  const { rangeStart, rangeEnd } = useMemo(() => {
     if (!monthDates || monthDates.length === 0) {
-      return { eventsByDate, overflowByDate };
+      const today = dayjs().startOf('day');
+      return { rangeStart: today, rangeEnd: today.endOf('day') };
     }
+    const first = dayjs(monthDates[0]).startOf('day');
+    const last = dayjs(monthDates[monthDates.length - 1]).endOf('day');
+    return { rangeStart: first, rangeEnd: last };
+  }, [monthDates]);
 
-    const sorter = makeSorter(sortMode);
+  useEffect(() => {
+    let cancelled = false;
 
-    for (const d of monthDates) {
-      // 1) DB からその日のイベントを取得
-      const raw: EventInstance[] = listInstancesByDate(d) ?? [];
+    (async () => {
+      // 初期化
+      const tmpEventsByDate: Record<string, EventInstance[]> = {};
+      const tmpOverflowByDate: Record<string, number> = {};
 
-      // 2) 表示対象でフィルタ → 簡易重複排除
-      const filtered = filterEventsByEntity(raw);
-      const uniq: EventInstance[] = [];
-      const seen = new Set<string>();
-      for (const ev of filtered) {
-        const k = keyOf(ev);
-        if (!seen.has(k)) { seen.add(k); uniq.push(ev); }
+      if (!monthDates || monthDates.length === 0) {
+        if (!cancelled) {
+          setEventsByDate({});
+          setOverflowByDate({});
+        }
+        return;
       }
 
-      // 3) 並べ替え → レーン割付（MAX_BARS_PER_DAY に収める）
-      const sorted = uniq.sort(sorter);
-      const laid = layoutIntoLanes(sorted, MAX_BARS_PER_DAY);
+      // doc をロード
+      const doc = await loadServerDoc();
+      const all = Object.values(doc?.entities?.events ?? {});
 
-      eventsByDate[d] = laid;
-      overflowByDate[d] = Math.max(0, sorted.length - laid.length);
-    }
+      // 事前に日付バケットを作成
+      for (const d of monthDates) tmpEventsByDate[d] = [];
 
-    return { eventsByDate, overflowByDate };
-    // monthDates/filter/sortMode に反応しつつ、refreshKey も変更で再計算
-  }, [monthDates, filterEventsByEntity, sortMode, refreshKey]);
+      // 各イベント → 指定範囲に展開 → 各日のインスタンス化
+      for (const ev of all) {
+        // expand（dtstart/until=YYYY-MM-DD, tz/start_at/end_at で展開）
+        const occs = expandEventInstances(ev as any, rangeStart, rangeEnd);
+        for (const { occurrenceDate } of occs) {
+          if (!tmpEventsByDate[occurrenceDate]) continue; // 範囲外の日付はスキップ
+
+          const times = getOccurrenceTimes(ev as any, occurrenceDate);
+          if (!isTimedOccurrence(times)) continue; // キャンセル回は除外
+
+          const startISO = times.start.toISOString();
+          const endISO = times.end.toISOString();
+
+          // タイトルは必ず string に（undefined を許さない）
+          const titleString =
+            (times.title ?? (ev as any).title ?? '') as string;
+
+          // 表示用インスタンス
+          const inst: EventInstance = {
+            instance_id: makeInstanceId((ev as any).event_id, occurrenceDate, startISO, endISO),
+            event_id: (ev as any).event_id,
+            calendar_id: (ev as any).calendar_links?.[0]?.calendar_id ?? null,
+            title: titleString, // 必ず文字列
+            summary: (times.summary ?? (ev as any).summary) as string | undefined,
+            color: (ev as any).color,
+            priority: (times.priority ?? (ev as any).priority) as any,
+            start_at: startISO,
+            end_at: endISO,
+          };
+
+          tmpEventsByDate[occurrenceDate].push(inst);
+        }
+      }
+
+      // 各日でフィルタ・重複排除・並び替え・レーン割付
+      const sorter = makeSorter(sortMode);
+      const finalized: Record<string, EventSegment[]> = {};
+      const overflows: Record<string, number> = {};
+
+      for (const d of monthDates) {
+        const raw = tmpEventsByDate[d] ?? [];
+
+        // 表示対象フィルタ
+        const filtered = filterEventsByEntity(raw);
+
+        // 簡易ユニーク
+        const uniq: EventInstance[] = [];
+        const seen = new Set<string>();
+        for (const ev of filtered) {
+          const k = keyOf(ev as EventInstance);
+          if (!seen.has(k)) { seen.add(k); uniq.push(ev as EventInstance); }
+        }
+
+        // 並び替え→レーン割付
+        const sorted = uniq.sort(sorter);
+        const laid = layoutIntoLanes(sorted, MAX_BARS_PER_DAY);
+
+        finalized[d] = laid;
+        overflows[d] = Math.max(0, sorted.length - laid.length);
+      }
+
+      if (!cancelled) {
+        setEventsByDate(finalized);
+        setOverflowByDate(overflows);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [monthDates, filterEventsByEntity, sortMode, refreshKey, rangeStart.valueOf(), rangeEnd.valueOf()]);
+
+  return { eventsByDate, overflowByDate };
 }
 
-export default useMonthEvents;
+// ★ 重要：デフォルトエクスポートはしない（重複エクスポートを避ける）

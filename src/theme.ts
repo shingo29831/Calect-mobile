@@ -82,7 +82,7 @@ const DARK: Theme = {
   eventDefaultFg: '#60a5fa',
   eventDefaultBg: 'rgba(96,165,250,0.12)',
   shadow: '#000000',
-  overLayBg: 'rgba(36, 50, 82, 0.8)',
+  overLayBg: 'rgba(36, 50, 82, 0.2)',
 };
 
 /** RN の ColorSchemeName は null のことがあるので正規化 */
