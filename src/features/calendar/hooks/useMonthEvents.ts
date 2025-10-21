@@ -1,4 +1,5 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+﻿// src/features/calendar/hooks/useMonthEvents.ts
+import { useEffect, useMemo, useState } from 'react';
 import dayjs from '../../../lib/dayjs';
 import { loadServerDoc } from '../../../store/serverDoc';
 import { expandEventInstances, getOccurrenceTimes, isTimedOccurrence } from '../../../utils/eventTime';
@@ -10,7 +11,7 @@ type EventInstance = {
   instance_id: string;
   event_id: string;
   calendar_id?: string | null;
-  title: string;          // 必須（CalendarParts 側に合わせる）
+  title: string;          // ← 必須に変更
   summary?: string;
   color?: string;
   priority?: 'low' | 'normal' | 'high';
@@ -97,7 +98,6 @@ function layoutIntoLanes(rows: EventInstance[], maxBars = MAX_BARS_PER_DAY): Eve
   return limited.map(({ __lane, ...seg }) => seg);
 }
 
-/** 月表示用：各日付に EventSegment[] を割り付け、さらに溢れ件数（more）も返す */
 export function useMonthEvents(
   monthDates: string[],
   filterEventsByEntity: (arr: any[]) => any[],
@@ -163,7 +163,7 @@ export function useMonthEvents(
             instance_id: makeInstanceId((ev as any).event_id, occurrenceDate, startISO, endISO),
             event_id: (ev as any).event_id,
             calendar_id: (ev as any).calendar_links?.[0]?.calendar_id ?? null,
-            title: titleString, // 必ず文字列
+            title: titleString, // ← 必ず文字列
             summary: (times.summary ?? (ev as any).summary) as string | undefined,
             color: (ev as any).color,
             priority: (times.priority ?? (ev as any).priority) as any,
@@ -214,4 +214,4 @@ export function useMonthEvents(
   return { eventsByDate, overflowByDate };
 }
 
-// ★ 重要：デフォルトエクスポートはしない（重複エクスポートを避ける）
+// ★ default export はしない（フックを Screen に誤設定されないようにする）
