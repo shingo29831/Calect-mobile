@@ -1,141 +1,204 @@
 ﻿// src/data/persistence/schemas.ts
-// ローカル永続化（スナップショット/差分ログ）に関する型を集約。
-// API契約（ネットワーク層の型）は ../../api/types に定義し、ここから参照します。
+export type ID = string;
 
-import type { Calendar, EventInstance } from "../../api/types";
-
-/** 現行スキーマのバージョン */
-export const CURRENT_SCHEMA_VERSION = 1 as const;
-
-/** ローカル保存スナップショット（後方互換のため最小限の形を維持） */
-export type LocalStoreSchema = {
-  /** スキーマバージョン（将来のマイグレーション用） */
-  version: typeof CURRENT_SCHEMA_VERSION;
-
-  /** 最後に同期が完了した時刻（ISO） */
-  lastSyncAt: string | null;
-
-  /** サーバ側のウォーターマーク/カーソル（差分取得の続き用） */
-  lastSyncCursor: string | null;
-
-  /** カレンダー一覧（公開属性のみ保持） */
-  calendars: Calendar[];
-
-  /**
-   * 互換のため一旦は配列で全件保持。
-   * 将来は「月分割 + 差分ログ（NDJSON）」へ段階移行していく。
-   */
-  instances: EventInstance[];
-
-  /** 論理削除（墓石） */
-  tombstones?: {
-    calendars: string[];                 // calendar_id[]
-    instances: Array<number | string>;   // instance_id（文字/数値どちらも許可）
-  };
+export type V2Profile = {
+  current_user_id?: string;
+  default_tz?: string;
+  locale?: string;
+  profile_image_path?: string | null;
+  username?: string | null;
+  username_url?: string | null;
+  display_name?: string | null;
+  email?: string | null;
+  updated_at?: string;
 };
 
-/** 空テンプレート（破損時のフォールバックにも使用） */
-export const emptyStore: LocalStoreSchema = {
-  version: CURRENT_SCHEMA_VERSION,
-  lastSyncAt: null,
-  lastSyncCursor: null,
-  calendars: [],
-  instances: [],
-  tombstones: { calendars: [], instances: [] },
+export type V2Organization = {
+  org_id: ID;
+  name: string;
+  plan?: string;
+  locale?: string;
+  tz?: string;
 };
 
-/* ========================= 差分ログ（NDJSON） =========================
-   1行＝1オペのイベントログとして保存する想定。
-   entity + type の判別可能ユニオンを使い、型ガードも提供。
-   ================================================================== */
+export type V2Follow = {
+  user_id: ID;
+  display_name?: string;
+  profile_image_path?: string | null;
+};
 
-/** 1件のイベントインスタンスに対する操作 */
-export type InstanceOp =
-  | { type: "upsert"; entity: "instance"; row: EventInstance; updated_at?: string | null }
-  | { type: "delete"; entity: "instance"; id: number | string; updated_at?: string | null };
+export type V2GroupMember = {
+  user_id: ID;
+  name?: string;
+  role?: 'owner'|'member'|'admin';
+  can_share?: boolean | string;
+  can_invite?: boolean | string;
+};
 
-/** 1件のカレンダーに対する操作 */
-export type CalendarOp =
-  | { type: "upsert"; entity: "calendar"; row: Calendar; updated_at?: string | null }
-  | { type: "delete"; entity: "calendar"; id: string; updated_at?: string | null };
+export type V2Group = {
+  group_id: ID;
+  owner_org_id?: ID | null;
+  owner_user_id?: ID | null;
+  name: string;
+  updated_at?: string;
+  members?: Record<ID, V2GroupMember>;
+};
 
-export type AnyOp = InstanceOp | CalendarOp;
+export type V2CalendarShare = {
+  user_id?: ID | null;
+  group_id?: ID | null;
+  content_visibility: 'busy'|'summary'|'full';
+};
 
-/* ============================ 型ガード群 ============================ */
+export type V2Calendar = {
+  calendar_id: ID;
+  owner_user_id?: ID | null;
+  owner_group_id?: ID | null;
+  name: string;
+  color?: string;
+  calendar_shares?: V2CalendarShare[];
+  updated_at?: string;
+  deleted_at?: string | null;
+};
 
-export function isInstanceOp(op: AnyOp): op is InstanceOp {
-  return op.entity === "instance";
-}
+export type V2EventCalendarLink = {
+  link_id: ID;               // ULID or Base62
+  calendar_id: ID;
+  content_visibility: 'busy'|'summary'|'full';
+  role?: 'mirror'|'alias'|'copy';
+  created_by: ID;
+  updated_at: string;        // ISO Z
+  deleted_at: string | null;
+};
 
-export function isCalendarOp(op: AnyOp): op is CalendarOp {
-  return op.entity === "calendar";
-}
+export type V2EventShare = {
+  user_id?: ID | null;
+  group_id?: ID | null;
+  content_visibility: 'busy'|'summary'|'full';
+};
 
-export function isUpsert(op: AnyOp): op is Extract<AnyOp, { type: "upsert" }> {
-  return op.type === "upsert";
-}
+export type V2EventRecurrence = {
+  rrule: string;             // RFC5545
+  tz: string;
+  start_at: string;          // "HH:mm"
+  end_at: string;            // "HH:mm"
+  dtstart: string;           // "YYYY-MM-DD"
+  until: string | null;
+};
 
-export function isDelete(op: AnyOp): op is Extract<AnyOp, { type: "delete" }> {
-  return op.type === "delete";
-}
+export type V2EventOverride = {
+  occurrence_date: string;   // "YYYY-MM-DD"
+  cancelled?: boolean;
+  title?: string;
+  summary?: string;
+  start_at?: string;         // "HH:mm"
+  end_at?: string;           // "HH:mm"
+  priority?: 'low'|'normal'|'high';
+};
 
-/* ====================== ユーティリティ: ディープクローン ====================== */
-/** 環境に structuredClone が無い場合でも動くディープクローン */
-function deepClone<T>(v: T): T {
-  const g: any = globalThis as any;
-  if (typeof g?.structuredClone === "function") {
-    return g.structuredClone(v);
-  }
-  // 循環参照は想定しない（emptyStore のようなプレーンデータ前提）
-  return JSON.parse(JSON.stringify(v)) as T;
-}
+export type V2EventTag = { tag_id: ID };
 
-/* ====================== スナップショット/マイグレーション ======================
-   将来 version が増えたときに備えて、入力を安全化する関数を用意。
-   破損データや欠落フィールドがあっても空テンプレにフォールバック。
-   ============================================================================ */
+export type V2Event = {
+  event_id: ID;
+  title: string;
+  summary?: string;
+  color?: string;
+  calendar_links?: V2EventCalendarLink[];
+  event_shares?: V2EventShare[];
+  followers_share?: boolean | string;
+  link_token?: string | null;
+  priority?: 'low'|'normal'|'high';
+  recurrence?: V2EventRecurrence;
+  overrides?: V2EventOverride[];
+  tags?: V2EventTag[];
+  created_by?: ID;
+  updated_by?: ID;
+  updated_at: string;        // ISO Z
+};
 
-/**
- * 与えられたオブジェクトを LocalStoreSchema として“安全に”正規化する。
- * - フィールド欠落時は空テンプレから補完
- * - 型が崩れているフィールドは空値へフォールバック
- * - version が違う場合のマイグレーション・フックを用意（将来拡張）
- */
-export function ensureLocalStoreSchema(input: unknown): LocalStoreSchema {
-  const base = deepClone(emptyStore);
+export type V2PushReminder = {
+  reminder_id: ID;
+  event_id: ID;
+  absolute_at: string;       // ISO+09:00 OK
+  updated_at: string;        // ISO Z
+};
 
-  if (!input || typeof input !== "object") return base;
-  const obj = input as Partial<LocalStoreSchema>;
+export type V2EventTagEntity = {
+  tag_id: ID;
+  name: string;
+  updated_at: string;
+};
 
-  // version（将来: if (obj.version === 2) return migrateV2toV1(obj) など）
-  (base as any).version = CURRENT_SCHEMA_VERSION;
+export type V2Plan = {
+  plan_code: string;
+  name: string;
+  summary?: string | null;
+  max_group_members_per_group: number;
+  max_groups_per_owner: number;
+  max_calendars_per_owner: number;
+  price_monthly_cents: number;
+  currency: string;
+  updated_at: string;
+};
 
-  // lastSyncAt / lastSyncCursor
-  if (typeof obj.lastSyncAt === "string" || obj.lastSyncAt === null) {
-    base.lastSyncAt = obj.lastSyncAt ?? null;
-  }
-  if (typeof obj.lastSyncCursor === "string" || obj.lastSyncCursor === null) {
-    base.lastSyncCursor = obj.lastSyncCursor ?? null;
-  }
+export type V2Subscription = {
+  sub_id: ID;
+  org_id: ID;
+  user_id?: ID | null;
+  plan_code: string;
+  status: 'active'|'canceled'|'past_due';
+  trial_end?: string | null;
+  current_period_start: string; // YYYY-MM-DD
+  current_period_end: string;   // YYYY-MM-DD
+  updated_at: string;
+};
 
-  // calendars
-  if (Array.isArray(obj.calendars)) {
-    base.calendars = obj.calendars as Calendar[];
-  }
+export type V2Entities = {
+  organizations?: Record<ID, V2Organization>;
+  follows?: Record<ID, V2Follow>;
+  groups?: Record<ID, V2Group>;
+  calendars?: Record<ID, V2Calendar>;
+  events?: Record<ID, V2Event>;
+  push_reminders?: V2PushReminder[];
+  event_tags?: Record<ID, V2EventTagEntity>;
+  plans?: Record<string, V2Plan>;
+  subscriptions?: Record<ID, V2Subscription>;
+};
 
-  // instances
-  if (Array.isArray(obj.instances)) {
-    base.instances = obj.instances as EventInstance[];
-  }
+export type V2SyncHashes = {
+  document?: string;
+  profile?: string;
+  tombstones?: string;
+  organizations?: string;
+  follows?: string;
+  groups?: string;
+  org_relationships?: string;
+  calendars?: string;
+  events?: string;
+  push_reminders?: string;
+  event_tags?: string;
+  plans?: string;
+  subscriptions?: string;
+};
 
-  // tombstones
-  if (obj.tombstones && typeof obj.tombstones === "object") {
-    const t = obj.tombstones as LocalStoreSchema["tombstones"];
-    base.tombstones = {
-      calendars: Array.isArray(t?.calendars) ? t!.calendars.slice() : [],
-      instances: Array.isArray(t?.instances) ? t!.instances.slice() : [],
-    };
-  }
+export type V2Tombstones = {
+  organizations?: ID[];
+  follows?: ID[];
+  groups?: ID[];
+  org_relationships?: ID[];
+  calendars?: ID[];
+  events?: ID[];
+  push_reminders?: ID[];
+  event_tags?: ID[];
+  subscriptions?: ID[];
+  plans?: string[];
+  updated_at?: string;
+};
 
-  return base;
-}
+export type ServerDocV2 = {
+  version: 2;
+  profile?: V2Profile;
+  sync?: { hashes?: V2SyncHashes };
+  tombstones?: V2Tombstones;
+  entities?: V2Entities;
+};

@@ -44,6 +44,7 @@ import { useAnimatedDrawer } from '../hooks/useAnimatedDrawer';
 import { useMonthEvents } from '../hooks/useMonthEvents';
 import { styles } from '../styles/calendarStyles';
 import { useAppTheme } from '../../../theme';
+import type { ServerDocV2 } from '../../../data/persistence/schemas';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Calendar'>;
 type SortMode = 'span' | 'start';
@@ -72,20 +73,11 @@ function useTodayTick(fmt: string = 'YYYY-MM-DD') {
   return todayStr;
 }
 
-/* --------- 型とダイヤルコンポーネント（省略不可なのでこのまま） --------- */
-type ServerDocV2 = {
-  version: number;
-  profile?: { current_user_id?: string; default_tz?: string; locale?: string; profile_image_path?: string | null;
-    username?: string | null; username_url?: string | null; display_name?: string | null; email?: string | null; updated_at?: string; };
-  entities?: {
-    organizations?: Record<string, { org_id: string; name: string; plan?: string; locale?: string; tz?: string }>;
-    follows?: Record<string, { user_id: string; display_name?: string; profile_image_path?: string | null }>;
-    groups?: Record<string, { group_id: string; owner_org_id?: string | null; owner_user_id?: string | null; name: string; updated_at?: string;
-      members?: Record<string, { user_id: string; name?: string; role?: string; can_share?: string | boolean; can_invite?: string | boolean; }>;
-    }>;
-  };
-  sync?: unknown;
-  tombstones?: unknown;
+/* --------- 新JSON(v2)に完全対応した型定義 --------- */
+type Hashes = {
+  document?: string; profile?: string; tombstones?: string; organizations?: string; follows?: string;
+  groups?: string; org_relationships?: string; calendars?: string; events?: string; push_reminders?: string;
+  event_tags?: string; plans?: string; subscriptions?: string;
 };
 
 type ClientPrefsV1 = {
@@ -418,7 +410,10 @@ export default function CalendarScreen({ navigation }: Props) {
   // UI 用エンティティ
   const ORGS: EntityItem[] = useMemo(() => {
     const list: EntityItem[] = [];
-    const displayName = server?.profile?.display_name || 'My Schedule';
+    const displayName =
+      server?.profile?.display_name ||
+      server?.profile?.username ||
+      'My Schedule';
     list.push({ id: 'org_me', label: displayName, emoji: '🗓️', kind: 'me' });
 
     const orgs = Object.values(server?.entities?.organizations ?? {});

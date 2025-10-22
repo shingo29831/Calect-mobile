@@ -1,144 +1,158 @@
 ﻿// src/data/persistence/monthShard.ts
-import RNFS from "react-native-fs";
-import dayjs from "../../lib/dayjs";
-import type { EventInstance } from "../../api/types";
-import { fromUTC, startOfLocalDay, endOfLocalDay } from "../../utils/time";
+import dayjs from '../../lib/dayjs';
+import { readFile, writeFile } from '../../store/localFile';
+import { ServerDocV2, V2Event, V2EventTagEntity } from './schemas';
 
-// 例: /files/calect/months/2025-03.json
-export const MONTHS_DIR = `${RNFS.DocumentDirectoryPath}/calect/months`;
+// 保存ファイル名は従来と同じ（内容が v2 になる）
+const monthPath = (yyyyMM: string) => `months/${yyyyMM}.json`;
 
-const memMonthCache = new Map<string, EventInstance[]>(); // "YYYY-MM" -> instances[]
-const loading = new Map<string, Promise<void>>();
-
-/** 月キー（YYYY-MM） */
-export const monthKeyFromISO = (iso: string) => dayjs(iso).format("YYYY-MM");
-
-/** 月ファイルパス */
-const fileForMonth = (yyyyMM: string) => `${MONTHS_DIR}/${yyyyMM}.json`;
-
-async function ensureDir() {
-  if (!(await RNFS.exists(MONTHS_DIR))) await RNFS.mkdir(MONTHS_DIR);
+// ------- ちいさなメモリキャッシュ（任意） -------
+const monthCache = new Map<string, ServerDocV2>();
+export function clearMonthCache() {
+  monthCache.clear();
 }
 
-/** 月がキャッシュ済みかどうか（存在チェックのみ） */
-export function hasMonthInCache(yyyyMM: string) {
-  return memMonthCache.has(yyyyMM);
+// ====== 公開：月束ロード / 事前確保 ======
+export async function ensureMonths(months: string[]) {
+  await Promise.all(months.map(loadMonth));
 }
 
-/** ――― ユニーク判定（occurrence_key > instance_id > event_id@@start_at）――― */
-function instanceKey(x: Pick<EventInstance, "instance_id" | "event_id" | "start_at" | "occurrence_key">) {
-  return (x as any).occurrence_key ?? (x as any).instance_id ?? `${x.event_id}@@${x.start_at}`;
-}
-function mergeUniqueByKey(existing: EventInstance[], adds: EventInstance[]) {
-  const m = new Map<string, EventInstance>();
-  for (const r of existing) m.set(instanceKey(r), r);
-  for (const r of adds) m.set(instanceKey(r), r);
-  return Array.from(m.values());
-}
+export async function loadMonth(yyyyMM: string): Promise<ServerDocV2> {
+  // キャッシュ
+  const hit = monthCache.get(yyyyMM);
+  if (hit) return hit;
 
-/** 月の読み込み（メモリキャッシュ＋ファイル：新パスのみ） */
-export async function loadMonth(yyyyMM: string) {
-  if (memMonthCache.has(yyyyMM)) return;
-  if (loading.has(yyyyMM)) return loading.get(yyyyMM)!;
-
-  const task = (async () => {
-    await ensureDir();
-    const path = fileForMonth(yyyyMM);
-    if (!(await RNFS.exists(path))) {
-      memMonthCache.set(yyyyMM, []);
-      return;
-    }
-    const txt = await RNFS.readFile(path, "utf8");
-    const rows = JSON.parse(txt) as EventInstance[];
-    memMonthCache.set(yyyyMM, rows);
-  })();
-
-  loading.set(yyyyMM, task);
-  await task.finally(() => loading.delete(yyyyMM));
-}
-
-/** 複数月の事前ロード */
-export async function ensureMonths(yyyyMMs: string[]) {
-  await Promise.all(yyyyMMs.map(loadMonth));
-}
-
-/** 中心月の前後をプリフェッチ（span=1 → 前後1か月ずつ） */
-export async function prefetchMonthRange(centerYYYYMM: string, span = 1) {
-  const base = dayjs(centerYYYYMM + "-01");
-  const keys: string[] = [];
-  for (let i = -span; i <= span; i++) keys.push(base.add(i, "month").format("YYYY-MM"));
-  await ensureMonths(keys);
-}
-
-/** 指定月の配列を取得（未ロードなら自動ロードしてから返す） */
-export async function getMonthInstances(yyyyMM: string): Promise<EventInstance[]> {
-  if (!memMonthCache.has(yyyyMM)) {
-    await loadMonth(yyyyMM);
+  const path = monthPath(yyyyMM);
+  const raw = await readFile(path).catch(() => null);
+  if (!raw) {
+    const empty = emptyMonthDoc();
+    monthCache.set(yyyyMM, empty);
+    return empty;
   }
-  return memMonthCache.get(yyyyMM) ?? [];
+  try {
+    const obj = JSON.parse(raw);
+    // v1→v2 変換を許容
+    const v2 = (obj?.version === 2) ? (obj as ServerDocV2) : migrateV1toV2(obj);
+    monthCache.set(yyyyMM, v2);
+    return v2;
+  } catch {
+    const empty = emptyMonthDoc();
+    monthCache.set(yyyyMM, empty);
+    return empty;
+  }
 }
 
-/** 1日分のインスタンス取得（ローカルTZで範囲判定） */
-export function getInstancesForDate(dateISO: string): EventInstance[] {
-  const yyyyMM = monthKeyFromISO(dateISO);
-  const all = memMonthCache.get(yyyyMM) ?? [];
-  const dayStart = startOfLocalDay(dateISO);
-  const dayEnd = endOfLocalDay(dateISO);
-
-  return all.filter((i) => {
-    const s = fromUTC(i.start_at);
-    const e = fromUTC(i.end_at);
-    return s.isBefore(dayEnd) && (e.isAfter(dayStart) || e.isSame(dayStart));
-  });
+function emptyMonthDoc(): ServerDocV2 {
+  return { version: 2, entities: { events: {}, event_tags: {} } } as ServerDocV2;
 }
 
-/** 1か月分を上書き保存（メモリ＋ディスク：新パスに統一） */
-export async function upsertMonthInstances(yyyyMM: string, rows: EventInstance[]) {
-  await ensureDir();
-  memMonthCache.set(yyyyMM, rows);
-  const path = fileForMonth(yyyyMM);
-  await RNFS.writeFile(path, JSON.stringify(rows), "utf8");
+function migrateV1toV2(v1: any): ServerDocV2 {
+  const events: Record<string, V2Event> = {};
+  const event_tags: Record<string, V2EventTagEntity> = {};
+
+  // 典型：{ events: [{ id/title/start_at/end_at/color/style:{tags:[]} ... }] }
+  const list = Array.isArray(v1?.events) ? v1.events : [];
+  for (const ev of list) {
+    const id = ev.event_id || ev.id;
+    if (!id) continue;
+    const tags = (ev?.style?.tags ?? ev?.tags ?? []).map((t: string) => ({ tag_id: String(t) }));
+    const nowIso = dayjs().toISOString();
+
+    events[id] = {
+      event_id: id,
+      title: ev.title ?? '',
+      summary: ev.summary ?? ev.memo ?? '',
+      color: ev.color ?? null,
+      updated_at: ev.updated_at ?? nowIso,
+      calendar_links: ev.calendar_id
+        ? [
+            {
+              link_id: ev.link_id ?? id,
+              calendar_id: ev.calendar_id,
+              content_visibility: 'full',
+              created_by: ev.created_by ?? 'me',
+              updated_at: ev.updated_at ?? nowIso,
+              deleted_at: null,
+            },
+          ]
+        : [],
+      event_shares: [],
+      followers_share: false,
+      priority: 'normal',
+      overrides: [],
+      tags,
+    };
+
+    for (const t of tags) {
+      if (!event_tags[t.tag_id]) {
+        event_tags[t.tag_id] = { tag_id: t.tag_id, name: t.tag_id, updated_at: nowIso };
+      }
+    }
+  }
+  return { version: 2, entities: { events, event_tags } };
 }
 
-/** 追加配列をマージして保存（ユニーク判定付き） */
-export async function upsertMonthInstancesMerged(yyyyMM: string, adds: EventInstance[]) {
-  await ensureDir();
-  const current = await getMonthInstances(yyyyMM);
-  const merged = mergeUniqueByKey(current, adds);
-  await upsertMonthInstances(yyyyMM, merged);
+async function writeMonth(yyyyMM: string, doc: ServerDocV2) {
+  const path = monthPath(yyyyMM);
+  await writeFile(path, JSON.stringify(doc));
+  monthCache.set(yyyyMM, doc);
 }
 
-/** 単一インスタンスを該当月へ追加（ユニーク判定付き） */
-export async function upsertSingleInstance(inst: EventInstance) {
-  const ym = monthKeyFromISO(inst.start_at);
-  await upsertMonthInstancesMerged(ym, [inst]);
-}
+// ====== ユーティリティ：月範囲（YYYY-MM 配列） ======
+function monthSpan(startIso: string, endIso: string): string[] {
+  let s = dayjs(startIso);
+  let e = dayjs(endIso);
+  if (!s.isValid()) s = dayjs();
+  if (!e.isValid()) e = s;
+  if (e.isBefore(s)) e = s;
 
-/** 複数日（YYYY-MM-DD[]）の結果をまとめて返す（必要月は自動ロード） */
-export async function getByDatesWithEnsure(dates: string[]): Promise<Record<string, EventInstance[]>> {
-  const months = Array.from(new Set(dates.map((d) => d.slice(0, 7))));
-  await ensureMonths(months);
-  const out: Record<string, EventInstance[]> = {};
-  for (const d of dates) out[d] = getInstancesForDate(d);
+  const out: string[] = [];
+  let cur = s.startOf('month');
+  const last = e.startOf('month');
+  while (cur.isBefore(last) || cur.isSame(last)) {
+    out.push(cur.format('YYYY-MM'));
+    cur = cur.add(1, 'month');
+  }
   return out;
 }
 
-/** （任意ユーティリティ）cid→event_id の置換を月ファイルにも反映 */
-export async function applyEventIdMappingInMonths(m: Map<string, string>, targetMonths: string[]) {
-  if (!m.size) return;
-  await ensureMonths(targetMonths);
-  for (const ym of targetMonths) {
-    const arr = await getMonthInstances(ym);
-    let changed = false;
-    for (const it of arr) {
-      const real = m.get((it as any).event_id as string) || ((it as any).cid_ulid && m.get((it as any).cid_ulid));
-      if (real) {
-        (it as any).cid_ulid = null;
-        (it as any).event_id = real;
-        (it as any).occurrence_key = `${real}@@${it.start_at}`;
-        changed = true;
+// ====== v2 イベントの UPSERT ======
+// 期間オプションを受け取り、該当する複数月のシャードに分散保存します。
+// 呼び出し元（db.ts）は upsertEventV2(e, { start_at_iso, end_at_iso }) で渡してきます。
+type UpsertOpts = { start_at_iso?: string; end_at_iso?: string };
+
+export async function upsertEventV2(e: V2Event, opts?: UpsertOpts) {
+  // 書き込む月束を決定：期間があれば期間優先、無ければ updated_at の月
+  const months =
+    opts?.start_at_iso && opts?.end_at_iso
+      ? monthSpan(opts.start_at_iso, opts.end_at_iso)
+      : [dayjs(e.updated_at).format('YYYY-MM')];
+
+  // 各月へ反映
+  await Promise.all(
+    months.map(async (m) => {
+      const doc = await loadMonth(m);
+      if (!doc.entities) doc.entities = {};
+      if (!doc.entities.events) doc.entities.events = {};
+      if (!doc.entities.event_tags) doc.entities.event_tags = {};
+
+      // イベント本体 upsert
+      doc.entities.events[e.event_id] = e;
+
+      // タグ辞書補完
+      if (e.tags?.length) {
+        for (const t of e.tags) {
+          if (!doc.entities.event_tags[t.tag_id]) {
+            doc.entities.event_tags[t.tag_id] = {
+              tag_id: t.tag_id,
+              name: t.tag_id,
+              updated_at: e.updated_at,
+            };
+          }
+        }
       }
-    }
-    if (changed) await upsertMonthInstances(ym, arr);
-  }
+
+      await writeMonth(m, doc);
+    })
+  );
 }

@@ -1,220 +1,136 @@
 ﻿// src/data/persistence/localStore.ts
-import RNFS from "react-native-fs";
-import dayjs from "../../lib/dayjs";
-import type { EventInstance, Calendar } from "../../api/types";
-import { ensureDirs, SNAPSHOT_PATH, OPS_LOG_PATH, monthFile, atomicWrite } from "./filePaths";
-import type { LocalStoreSchema, AnyOp } from "./schemas";
-import { emptyStore as EMPTY_TEMPLATE } from "./schemas";
+// v2 スナップショット（server.v2.json）とローカル全初期化ユーティリティ
+// - resetLocalData: months/*, ops/*, queue/* と旧スナップショット類を安全に初期化
+// - writeSnapshotV2 / readSnapshotV2: サーバー由来の v2 JSON を保存/読込
 
-/** ===== 安全読み込み（存在しなければ null） ===== */
-async function safeRead(path: string): Promise<string | null> {
-  const ok = await RNFS.exists(path);
-  if (!ok) return null;
-  return RNFS.readFile(path, "utf8");
+import {
+  writeFile,
+  readFile,
+  // 以下は localFile 側にあれば使い、無ければ try-catch でフォールバックします
+  // 型エラーを避けるため any で受けつつ、存在チェックしてから使用します。
+  // @ts-ignore
+  removeFile as _removeFile,
+  // @ts-ignore
+  removeDir as _removeDir,
+  // @ts-ignore
+  listFiles as _listFiles,
+  // @ts-ignore
+  ensureDir as _ensureDir,
+  // @ts-ignore
+  exists as _exists,
+} from '../../store/localFile';
+import { ServerDocV2 } from './schemas';
+
+const SNAPSHOT_PATH = 'snapshot/server.v2.json';
+
+// 可能なら使う（無ければ undefined のまま）
+const removeFile: undefined | ((p: string) => Promise<void>) = _removeFile;
+const removeDir:  undefined | ((p: string) => Promise<void>) = _removeDir;
+const listFiles:  undefined | ((prefix: string) => Promise<string[]>) = _listFiles;
+const ensureDir:  undefined | ((p: string) => Promise<void>) = _ensureDir;
+const exists:     undefined | ((p: string) => Promise<boolean>) = _exists;
+
+/** ユーティリティ：ファイルを空に truncate（無ければ作成） */
+async function truncateFile(path: string) {
+  await writeFile(path, '');
 }
 
-/** ===== 1) スナップショット（アプリ全体のローカル状態） ===== */
-export async function loadLocalStore(): Promise<LocalStoreSchema> {
-  await ensureDirs();
-  const raw = await safeRead(SNAPSHOT_PATH);
-  if (!raw) return { ...EMPTY_TEMPLATE };
+/** ユーティリティ：JSON を安全に書き出し（フォルダ未作成でも可能なら作る） */
+async function writeJson(path: string, obj: any) {
   try {
-    return JSON.parse(raw) as LocalStoreSchema;
-  } catch {
-    // 壊れていたら空テンプレで復旧
-    return { ...EMPTY_TEMPLATE };
+    await writeFile(path, JSON.stringify(obj));
+  } catch (e) {
+    // 親ディレクトリが無ければ作成を試みる
+    const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+    if (dir && ensureDir) {
+      try {
+        await ensureDir(dir);
+        await writeFile(path, JSON.stringify(obj));
+        return;
+      } catch {}
+    }
+    throw e;
   }
 }
 
-export async function saveLocalStore(store: LocalStoreSchema) {
-  await ensureDirs();
-  await atomicWrite(SNAPSHOT_PATH, JSON.stringify(store));
-}
-
-// emptyStore を export（他箇所で初期テンプレ参照用）
-export const emptyStore: LocalStoreSchema = { ...EMPTY_TEMPLATE };
-
-/** ===== 2) オペログ（ops.ndjson 相当） ===== */
-// NDJSON を追記保存
-export async function appendOps(ops: AnyOp[]) {
-  if (!ops.length) return;
-  await ensureDirs();
-  const lines = ops.map((o) => JSON.stringify(o)).join("\n") + "\n";
-  await RNFS.appendFile(OPS_LOG_PATH, lines, "utf8");
-}
-
-// 全オペ読み込み（必要あればストリーム化可）
-export async function readAllOps(): Promise<AnyOp[]> {
-  await ensureDirs();
-  const raw = await safeRead(OPS_LOG_PATH);
-  if (!raw) return [];
-  const out: AnyOp[] = [];
-  for (const line of raw.split("\n")) {
-    const s = line.trim();
-    if (!s) continue;
+/** ユーティリティ：ディレクトリ配下をクリア（API があれば使い、無ければ個別削除 or 既知ファイルを truncate） */
+async function clearDir(dir: string, knownFilesToTruncate: string[] = []) {
+  // 1) removeDir があればフォルダ丸ごと削除
+  if (removeDir) {
     try {
-      out.push(JSON.parse(s));
-    } catch {
-      // 破損行はスキップ
-    }
-  }
-  return out;
-}
-
-/** ===== 3) 月ファイル（YYYY-MM.json）読み書き ===== */
-function yyyymmFromISO(iso: string): string {
-  return dayjs(iso).format("YYYY-MM");
-}
-
-export async function readMonth(yyyyMM: string): Promise<EventInstance[]> {
-  await ensureDirs();
-  const p = monthFile(yyyyMM);
-  const raw = await safeRead(p);
-  if (!raw) return [];
-  try {
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? (arr as EventInstance[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-export async function writeMonth(yyyyMM: string, rows: EventInstance[]) {
-  await ensureDirs();
-  const p = monthFile(yyyyMM);
-  await atomicWrite(p, JSON.stringify(rows));
-}
-
-/** ===== 4) 複数日（YYYY-MM-DD[]）のインスタンスをまとめてロード =====
- *  - まず月ファイルを読み、続いて ops を当てて上書き（簡易リプレイ）
- */
-export async function loadInstancesForDates(dates: string[]): Promise<EventInstance[]> {
-  await ensureDirs();
-  const months = Array.from(new Set(dates.map((d) => dayjs(d).format("YYYY-MM"))));
-
-  // 1) 月ファイルの集合
-  const base: EventInstance[] = [];
-  for (const m of months) {
-    const rows = await readMonth(m);
-    base.push(...rows);
+      await removeDir(dir);
+      // 可能なら空フォルダを再生成（無ければスキップ）
+      if (ensureDir) await ensureDir(dir);
+      return;
+    } catch { /* fallback へ */ }
   }
 
-  // 2) ops を当てて最終状態へ
-  const ops = await readAllOps();
-  if (ops.length) {
-    const idx = new Map<string | number, EventInstance>();
-    for (const row of base) idx.set(row.instance_id, row);
-
-    for (const op of ops) {
-      if (op.entity !== "instance") continue;
-      if (op.type === "upsert") {
-        const row = op.row;
-        const m = yyyymmFromISO(row.start_at);
-        if (months.includes(m)) idx.set(row.instance_id, row);
-      } else if (op.type === "delete") {
-        idx.delete(op.id);
-      }
-    }
-    return Array.from(idx.values());
-  }
-  return base;
-}
-
-/** ===== 5) コンパクション（ops → 月ファイルへ反映し ops を空に） ===== */
-export async function compactStorage() {
-  await ensureDirs();
-  const ops = await readAllOps();
-  if (!ops.length) return;
-
-  // ops を月ごとに集計（delete は全体扱い）
-  const byMonth = new Map<string, { upserts: EventInstance[]; deletes: Array<string | number> }>();
-  for (const op of ops) {
-    if (op.entity !== "instance") continue;
-    if (op.type === "upsert") {
-      const m = yyyymmFromISO(op.row.start_at);
-      const bucket = byMonth.get(m) ?? { upserts: [], deletes: [] };
-      bucket.upserts.push(op.row);
-      byMonth.set(m, bucket);
-    } else {
-      const bucket = byMonth.get("__ALL__") ?? { upserts: [], deletes: [] };
-      bucket.deletes.push(op.id);
-      byMonth.set("__ALL__", bucket);
-    }
-  }
-
-  const globalDeletes = new Set(byMonth.get("__ALL__")?.deletes ?? []);
-  byMonth.delete("__ALL__");
-
-  for (const [m, bucket] of byMonth.entries()) {
-    const oldRows = await readMonth(m);
-    const map = new Map<string | number, EventInstance>(oldRows.map((r) => [r.instance_id, r]));
-    for (const id of globalDeletes) map.delete(id);
-    for (const r of bucket.upserts) map.set(r.instance_id, r);
-    await writeMonth(m, Array.from(map.values()));
-  }
-
-  // ops をクリア
-  await atomicWrite(OPS_LOG_PATH, "");
-}
-
-/** ===== 6) 初期ロード用のまとめ読み ===== */
-export async function loadCalendarsAndAllInstances(): Promise<{
-  calendars: Calendar[];
-  instances: EventInstance[];
-  lastSyncAt: string | null;
-  lastSyncCursor: string | null;
-}> {
-  const snap = await loadLocalStore();
-  return {
-    calendars: snap.calendars,
-    instances: snap.instances ?? [],
-    lastSyncAt: snap.lastSyncAt,
-    lastSyncCursor: snap.lastSyncCursor,
-  };
-}
-
-/** ===== 7) ★ローカルデータの完全リセット =====
- * - months ディレクトリ配下の月ファイル削除
- * - ops ログを空に
- * - 送信キュー（存在すれば）削除
- * - snapshot.json を空テンプレで上書き
- */
-export async function resetLocalData(): Promise<void> {
-  await ensureDirs();
-
-  // 1) months 配下を全削除
-  try {
-    const sample = monthFile("2000-01"); // e.g. /.../calect/months/2000-01.json
-    const MONTHS_DIR = sample.replace(/\/[^/]+$/, "");
-    if (await RNFS.exists(MONTHS_DIR)) {
-      const files = await RNFS.readDir(MONTHS_DIR);
+  // 2) listFiles + removeFile で個別削除
+  if (listFiles && removeFile) {
+    try {
+      const files = await listFiles(`${dir}/`);
       for (const f of files) {
-        try {
-          // 念のため .json だけ削除
-          if (f.isFile() && /\.json$/i.test(f.name)) {
-            await RNFS.unlink(f.path);
-          }
-        } catch {}
+        try { await removeFile(f); } catch {}
       }
-    }
-  } catch {}
+      return;
+    } catch { /* fallback へ */ }
+  }
 
-  // 2) ops ログを空に
-  try {
-    await atomicWrite(OPS_LOG_PATH, "");
-  } catch {}
+  // 3) 既知ファイルだけでも空に
+  for (const f of knownFilesToTruncate) {
+    try { await truncateFile(f); } catch {}
+  }
+}
 
-  // 3) 送信キュー（存在すれば）削除
+/** 旧スナップショットの初期化（存在すれば空配列などに） */
+async function clearLegacySnapshots() {
+  // 旧ローカル UI 用スナップショット
+  const SNAP_INSTANCES = 'snapshot/instances.v1.json';
+  const payload = { instances: [] as any[], tags: [] as string[], _tags: [] as string[] };
   try {
-    const QUEUE_FILE = `${RNFS.DocumentDirectoryPath}/calect/queue/events.queue.jsonl`;
-    if (await RNFS.exists(QUEUE_FILE)) {
-      await RNFS.unlink(QUEUE_FILE);
-    }
+    await writeJson(SNAP_INSTANCES, payload);
   } catch {}
+}
 
-  // 4) snapshot.json を空テンプレで上書き
+/** ローカル全初期化：months/*, queue/*, ops/* をクリアし、旧スナップショットも初期化 */
+export async function resetLocalData() {
+  // months ディレクトリ：v2 月シャード
+  await clearDir('months');
+
+  // queue ディレクトリ（存在する場合）
+  await clearDir('queue', [
+    'queue/push.ndjson',
+    'queue/pull.ndjson',
+  ]);
+
+  // ops ディレクトリ（旧ローカル操作ログ）
+  await clearDir('ops', [
+    'ops/instances.ndjson',
+    'ops/events.ndjson',
+  ]);
+
+  // 旧ローカルスナップショットも初期化（UI の一時表示整合のため）
+  await clearLegacySnapshots();
+
+  // server.v2.json 自体は残す（完全オフライン時の UI 参照用）
+  // ※完全リセットしたい場合は以下のコメントアウトを外す
+  // if (removeFile) { try { await removeFile(SNAPSHOT_PATH); } catch {} }
+}
+
+/** v2 サーバースナップショットを書き出し */
+export async function writeSnapshotV2(doc: ServerDocV2) {
+  if (!doc.version) (doc as any).version = 2;
+  await writeJson(SNAPSHOT_PATH, doc);
+}
+
+/** v2 サーバースナップショットを読み込み（version=2 以外は null 扱い） */
+export async function readSnapshotV2(): Promise<ServerDocV2 | null> {
+  const raw = await readFile(SNAPSHOT_PATH).catch(() => null);
+  if (!raw) return null;
   try {
-    const empty = { ...EMPTY_TEMPLATE, lastSyncAt: null, lastSyncCursor: null };
-    await atomicWrite(SNAPSHOT_PATH, JSON.stringify(empty));
-  } catch {}
+    const obj = JSON.parse(raw);
+    return (obj?.version === 2) ? (obj as ServerDocV2) : null;
+  } catch {
+    return null;
+  }
 }

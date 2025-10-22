@@ -177,11 +177,20 @@ JSON形式
     "events": {
       "{イベントID}": {
         "event_id": "{イベントID}",
-        "calendar_id": "{イベント所有カレンダーID}",
         "title": "{タイトル}",
         "summary": "{詳細説明}",
-        "start_at": "{開始時刻 HH:mm 例: 09:30}",
-        "end_at": "{終了時刻 HH:mm 例: 10:30}",
+        "color": "{カラーHEX 例: #2563EB}",
+        "calendar_links": [
+          {
+              "link_id": "{ULID or Base62}",               // 重複防止・差分同期用
+              "calendar_id": "{カレンダーID}",
+              "content_visibility": "full",                 // busy|summary|full
+              "role": "mirror",                             // 任意: mirror|alias|copy 等
+              "created_by": "{ユーザID}",
+              "updated_at": "2025-10-21T01:23:45Z",
+              "deleted_at": null                            // 解除時にISO、未解除はnull
+          }
+        ],
         "event_shares": [
           {
             "user_id": "{共有対象ユーザIDまたはnull}",
@@ -194,10 +203,11 @@ JSON形式
         "priority": "{優先度 例: low|normal|high}",
         "recurrence": {
           "rrule": "{RFC5545 RRULE 例: FREQ=WEEKLY;BYDAY=MO,WE,FR}",
-          "dtstart": "{基準日時（TZ必須） 例: 2025-10-08T09:30:00+09:00}",
-          "exdates": ["{除外日時(ISO8601) 例: 2025-10-13T09:30:00+09:00}"],
-          "rdates": ["{追加発生日時(ISO8601) 例: 2025-10-20T09:30:00+09:00}"],
-          "until": "{終了日時(ISO8601)またはnull 例: 2025-12-31T23:59:59Z}"
+          "tz": "{タイムゾーン 例: Asia/Tokyo}"
+          "start_at": "{開始時刻 HH:mm 例: 09:30}",
+          "end_at": "{終了時刻 HH:mm 例: 10:30}",
+          "dtstart": "{開始日 例: 2025-10-08}",
+          "until": "{終了日またはnull 例: 2025-12-31}"
         },
         "overrides": [
           {
@@ -213,6 +223,7 @@ JSON形式
         "tags": [
           { "tag_id": "{タグID}" }
         ],
+        "created_by": "{更新者ユーザID}",
         "updated_by": "{更新者ユーザID}",
         "updated_at": "{更新日時 例: 2025-10-07T15:00:00Z}"
       }
