@@ -1,201 +1,205 @@
-﻿// src/features/calendar/hooks/useMonthEvents.ts
-import { useEffect, useMemo, useState } from 'react';
+﻿// src/features/calendar/screens/CalendarScreen.tsx
+// -----------------------------------------------------------------------------
+// 月間カレンダー画面（全置換 / 2025-10-22）
+// - 64行目エラー対応: getMonthRangeDates の呼び出し/返り値差異を吸収するラッパーを追加
+// - Theme -> CalendarTheme はアダプタで正規化
+// - WeekHeader に colWBase/colWLast を付与
+// - DayCell.state は '' | 'today' | 'disabled' | 'selected'
+// - useMonthEvents の EventSegment[] をそのまま DayCell に渡す
+// -----------------------------------------------------------------------------
+
+import React, { useMemo, useState, useCallback } from 'react';
+import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import dayjs from '../../../lib/dayjs';
-import { loadServerDoc } from '../../../store/serverDoc';
-import { expandEventInstances, getOccurrenceTimes, isTimedOccurrence } from '../../../utils/eventTime';
-import { MAX_BARS_PER_DAY } from '../components/CalendarParts';
+import { useAppTheme } from '../../../theme';
 
-/** 表示に必要な最小プロパティだけに絞ったインスタンス */
-type EventInstance = {
-  instance_id: string;         // 発生回でユニーク
-  event_id: string;
-  calendar_id?: string | null;
-  title: string;               // 必須（CalendarPartsに合わせる）
-  summary?: string;
-  color?: string;
-  priority?: 'low' | 'normal' | 'high';
-  start_at: string;            // ISO8601（tz含む）
-  end_at: string;              // ISO8601（tz含む）
-};
+// スタイル
+import { makeCalendarStyles, type CalendarTheme } from '../styles/calendarStyles';
 
-/** DayCell で使うイベント片（横バー1本分） */
-export type EventSegment = EventInstance & {
-  spanLeft: boolean;
-  spanRight: boolean;
-};
+// カレンダー部品
+import {
+  WeekHeader,
+  DayCell,
+  getMonthRangeDates,
+  SCREEN_W,
+} from '../components/CalendarParts';
 
-type SortMode = 'span' | 'start';
+// 月イベント展開フック
+import { useMonthEvents, type EventSegment, type SortMode } from '../hooks/useMonthEvents';
 
-/** 安定した instance_id を作る（event_id + date + start/end ISO を結合） */
-function makeInstanceId(
-  event_id: string,
-  occurrenceDate: string,
-  startISO: string,
-  endISO: string
-) {
-  return `${event_id}:${occurrenceDate}:${startISO}:${endISO}`;
-}
+type Props = { navigation?: any };
 
-/** 「同一」とみなすための簡易キー（暫定） */
-const keyOf = (ev: EventInstance) =>
-  `${String(ev.calendar_id ?? '')}|${String(ev.title)}|${String(ev.start_at)}|${String(ev.end_at)}`;
+const COLS = 7;        // 曜日数
+const ROWS = 6;        // 月表示は最大 6 週
+const COL_W = SCREEN_W / COLS;
+const CELL_H = 96;     // 1 日セルの高さ（必要に応じて調整）
 
-/** 並び順（開始時刻 or 所要時間の長い順） */
-function makeSorter(sortMode: SortMode) {
-  if (sortMode === 'start') {
-    return (a: EventInstance, b: EventInstance) =>
-      dayjs(a.start_at).valueOf() - dayjs(b.start_at).valueOf() ||
-      (a.title || '').localeCompare(b.title || '');
-  }
-  // 'span'：長いイベント優先 → 同時刻なら開始が早い方 → それでも同じならタイトル
-  return (a: EventInstance, b: EventInstance) => {
-    const spanA = dayjs(a.end_at).diff(dayjs(a.start_at), 'minute');
-    const spanB = dayjs(b.end_at).diff(dayjs(b.start_at), 'minute');
-    if (spanA !== spanB) return spanB - spanA;
-    const sa = dayjs(a.start_at).valueOf();
-    const sb = dayjs(b.start_at).valueOf();
-    if (sa !== sb) return sa - sb;
-    return (a.title || '').localeCompare(b.title || '');
+/** 任意の Theme を CalendarTheme へ正規化するアダプタ */
+function toCalendarTheme(anyTheme: any): CalendarTheme {
+  if (anyTheme && anyTheme.colors) return anyTheme as CalendarTheme;
+
+  const c = anyTheme?.palette ?? anyTheme?.color ?? {};
+  return {
+    colors: {
+      background: c.background ?? '#ffffff',
+      surface: c.surface ?? '#ffffff',
+      surfaceVariant: c.surfaceVariant,
+      onSurface: c.onSurface ?? '#111111',
+      onSurfaceVariant: c.onSurfaceVariant,
+      primary: c.primary ?? '#0ea5e9',
+      primaryContainer: c.primaryContainer,
+      outline: c.outline ?? '#e5e7eb',
+      overlay: c.overlay,
+      focus: c.focus ?? c.primary ?? '#0ea5e9',
+      danger: c.danger ?? '#ef4444',
+      success: c.success ?? '#22c55e',
+    },
+    roundness: anyTheme?.roundness ?? 12,
   };
 }
 
-/** 同一日のイベントを「重ならないように」縦レーンへ割り付ける */
-function layoutIntoLanes(rows: EventInstance[], maxBars = MAX_BARS_PER_DAY): EventSegment[] {
-  const laneEnd: number[] = [];
-  const placed: Array<EventSegment & { __lane: number }> = [];
-
-  for (const ev of rows) {
-    const s = dayjs(ev.start_at).valueOf();
-    const e = dayjs(ev.end_at).valueOf();
-
-    // 入れられる最初のレーンを探す
-    let lane = -1;
-    for (let i = 0; i < laneEnd.length; i++) {
-      if (s >= laneEnd[i]) { lane = i; break; }
-    }
-    if (lane === -1) {
-      lane = laneEnd.length;
-      laneEnd.push(0);
-    }
-    laneEnd[lane] = Math.max(laneEnd[lane], e);
-
-    placed.push({
-      ...ev,
-      spanLeft: false,
-      spanRight: false,
-      __lane: lane,
-    });
+/** getMonthRangeDates の入力/出力の差異を吸収する安全ラッパー */
+function resolveMonthDates(baseMonth: dayjs.Dayjs): string[] {
+  // 1) Date を渡してみる
+  try {
+    const r1: any = getMonthRangeDates(baseMonth.toDate() as any);
+    if (Array.isArray(r1)) return r1 as string[];
+    if (r1 && Array.isArray(r1.dates)) return r1.dates as string[];
+  } catch (_) {
+    // fallthrough
   }
-
-  placed.sort((a, b) => a.__lane - b.__lane);
-  const limited = placed.slice(0, maxBars);
-  return limited.map(({ __lane, ...seg }) => seg);
+  // 2) 文字列（'YYYY-MM-DD'）を渡してみる
+  try {
+    const r2: any = getMonthRangeDates(baseMonth.format('YYYY-MM-DD') as any);
+    if (Array.isArray(r2)) return r2 as string[];
+    if (r2 && Array.isArray(r2.dates)) return r2.dates as string[];
+  } catch (_) {
+    // fallthrough
+  }
+  // 3) どれも合わない場合は自前で 6 週ぶん生成（当月 1日基準）
+  const start = baseMonth.startOf('month').startOf('week'); // 日曜始まり想定（必要なら週の基準を調整）
+  return Array.from({ length: ROWS * COLS }, (_, i) => start.add(i, 'day').format('YYYY-MM-DD'));
 }
 
-/** 月表示用：各日付に EventSegment[] を割り付け、さらに溢れ件数（more）も返す */
-export function useMonthEvents(
-  monthDates: string[],
-  filterEventsByEntity: (arr: any[]) => any[],
-  sortMode: SortMode,
-  refreshKey?: any
-) {
-  const [eventsByDate, setEventsByDate] = useState<Record<string, EventSegment[]>>({});
-  const [overflowByDate, setOverflowByDate] = useState<Record<string, number>>({});
+const CalendarScreen: React.FC<Props> = () => {
+  const theme = useAppTheme();
+  const S = makeCalendarStyles(toCalendarTheme(theme)); // ← 40行目対策も継続
 
-  // 描画対象月の範囲
-  const { rangeStart, rangeEnd } = useMemo(() => {
-    if (!monthDates || monthDates.length === 0) {
-      const today = dayjs().startOf('day');
-      return { rangeStart: today, rangeEnd: today.endOf('day') };
-    }
-    const first = dayjs(monthDates[0]).startOf('day');
-    const last = dayjs(monthDates[monthDates.length - 1]).endOf('day');
-    return { rangeStart: first, rangeEnd: last };
-  }, [monthDates]);
+  // 表示基準の月（1 日の 00:00）
+  const [baseMonth, setBaseMonth] = useState(() => dayjs().startOf('month'));
 
-  useEffect(() => {
-    let cancelled = false;
+  // 並び順（長いイベント優先 or 開始時間順）
+  const [sortMode] = useState<SortMode>('span');
 
-    (async () => {
-      const tmpEventsByDate: Record<string, EventInstance[]> = {};
-      const tmpOverflowByDate: Record<string, number> = {};
+  // グリッドに並べる 'YYYY-MM-DD' の配列（最大 42 日）
+  const monthDates = useMemo(() => resolveMonthDates(baseMonth), [baseMonth]);
 
-      if (!monthDates || monthDates.length === 0) {
-        if (!cancelled) {
-          setEventsByDate({});
-          setOverflowByDate({});
-        }
-        return;
-      }
+  // 所属/タグなどでフィルタ（必要なら差し替え）
+  const filterEventsByEntity = useCallback((arr: any[]) => arr as any[], []);
 
-      const doc = await loadServerDoc();
-      const all = Object.values(doc?.entities?.events ?? {});
+  // 1 日あたりの EventSegment[] と more 件数
+  const { eventsByDate, overflowByDate } = useMonthEvents(
+    monthDates,
+    filterEventsByEntity,
+    sortMode,
+  );
 
-      for (const d of monthDates) tmpEventsByDate[d] = [];
+  // 月移動
+  const goPrev = () => setBaseMonth((m) => m.subtract(1, 'month'));
+  const goNext = () => setBaseMonth((m) => m.add(1, 'month'));
+  const goToday = () => setBaseMonth(dayjs().startOf('month'));
 
-      // 各イベント → 指定範囲に展開 → 各日のインスタンス化
-      for (const ev of all as any[]) {
-        const occs = expandEventInstances(ev as any, rangeStart, rangeEnd);
-        for (const { occurrenceDate } of occs) {
-          if (!tmpEventsByDate[occurrenceDate]) continue; // 範囲外
+  return (
+    <View style={S.root}>
+      {/* 月ヘッダー */}
+      <View style={S.monthHeader}>
+        <Pressable onPress={goPrev} style={S.monthNavBtn}>
+          <Text style={S.monthNavBtnText}>{'‹'}</Text>
+        </Pressable>
+        <Text style={S.monthTitle}>{baseMonth.format('YYYY MMMM')}</Text>
+        <View style={X.hRow}>
+          <Pressable onPress={goToday} style={[S.monthNavBtn, X.ghostBtn]}>
+            <Text style={S.monthNavBtnText}>Today</Text>
+          </Pressable>
+          <Pressable onPress={goNext} style={S.monthNavBtn}>
+            <Text style={S.monthNavBtnText}>{'›'}</Text>
+          </Pressable>
+        </View>
+      </View>
 
-          const times = getOccurrenceTimes(ev as any, occurrenceDate);
-          if (!isTimedOccurrence(times)) continue; // キャンセル回は除外
+      {/* 曜日ヘッダー（幅指定が必須） */}
+      <WeekHeader colWBase={COL_W} colWLast={COL_W} />
 
-          const startISO = times.start.toISOString();
-          const endISO = times.end.toISOString();
-          const titleString = (times.title ?? ev.title ?? '') as string;
+      {/* 月グリッド */}
+      <ScrollView style={S.monthGrid} contentContainerStyle={X.gridContent}>
+        {Array.from({ length: ROWS }).map((_, rowIdx) => {
+          const rowDates = monthDates.slice(rowIdx * COLS, rowIdx * COLS + COLS);
 
-          const inst: EventInstance = {
-            instance_id: makeInstanceId(ev.event_id, occurrenceDate, startISO, endISO),
-            event_id: ev.event_id,
-            calendar_id: ev.calendar_links?.[0]?.calendar_id ?? null,
-            title: titleString,
-            summary: (times.summary ?? ev.summary) as string | undefined,
-            color: ev.color,
-            priority: (times.priority ?? ev.priority) as any,
-            start_at: startISO,
-            end_at: endISO,
-          };
+          return (
+            <View key={`row-${rowIdx}`} style={S.weekRow}>
+              {rowDates.map((dateStr: string, colIdx: number) => {
+                const d = dayjs(dateStr);
+                const isOutside = d.month() !== baseMonth.month();
+                const isToday = d.isSame(dayjs(), 'day');
 
-          tmpEventsByDate[occurrenceDate].push(inst);
-        }
-      }
+                // useMonthEvents が返す EventSegment[] をそのまま使う
+                const daySegs: EventSegment[] = eventsByDate[dateStr] || [];
+                const moreCount = overflowByDate[dateStr] || 0;
 
-      // 各日でフィルタ・重複排除・並び替え・レーン割付
-      const sorter = makeSorter(sortMode);
-      const finalized: Record<string, EventSegment[]> = {};
-      const overflows: Record<string, number> = {};
+                return (
+                  <View
+                    key={dateStr}
+                    style={[S.dayCell, colIdx === 0 && X.noLeftDivider]}
+                  >
+                    <DayCell
+                      // DateData 互換
+                      date={{
+                        dateString: dateStr,
+                        day: d.date(),
+                        month: d.month() + 1,
+                        year: d.year(),
+                        timestamp: d.valueOf(),
+                      }}
+                      // DayCell の state 型: '' | 'today' | 'disabled' | 'selected'
+                      state={isToday ? 'today' : (isOutside ? 'disabled' : '')}
+                      onPress={() => {
+                        // TODO: ここに日別一覧や作成モーダルを開く処理
+                        // 例) setSelectedDate(dateStr); setSheetOpen(true);
+                      }}
+                      // 追加 props（CalendarParts の DayCell に合わせる）
+                      colWBase={COL_W}
+                      colWLast={COL_W}
+                      cellH={CELL_H}
+                      dayEvents={daySegs}
+                      moreCount={moreCount}
+                    />
+                  </View>
+                );
+              })}
+            </View>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+};
 
-      for (const d of monthDates) {
-        const raw = tmpEventsByDate[d] ?? [];
-        const filtered = filterEventsByEntity(raw);
+const X = StyleSheet.create({
+  hRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 8,
+  },
+  ghostBtn: {
+    opacity: 0.9,
+  },
+  noLeftDivider: {
+    // 左端に見える“薄い線”が気になる場合の対策
+    borderLeftWidth: 0,
+  },
+  gridContent: {
+    paddingBottom: 12,
+  },
+});
 
-        // 簡易ユニーク
-        const uniq: EventInstance[] = [];
-        const seen = new Set<string>();
-        for (const ev of filtered) {
-          const k = keyOf(ev as EventInstance);
-          if (!seen.has(k)) { seen.add(k); uniq.push(ev as EventInstance); }
-        }
-
-        const sorted = uniq.sort(sorter);
-        const laid = layoutIntoLanes(sorted, MAX_BARS_PER_DAY);
-
-        finalized[d] = laid;
-        overflows[d] = Math.max(0, sorted.length - laid.length);
-      }
-
-      if (!cancelled) {
-        setEventsByDate(finalized);
-        setOverflowByDate(overflows);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [monthDates, filterEventsByEntity, sortMode, refreshKey, rangeStart.valueOf(), rangeEnd.valueOf()]);
-
-  return { eventsByDate, overflowByDate };
-}
-
-// ★ default export は使わない（名前付きだけ）
+export default CalendarScreen;

@@ -1,171 +1,226 @@
-﻿// src/screens/calendar/calendarStyles.ts
-import { StyleSheet } from 'react-native';
-import { SCREEN_H, SCREEN_W, LINE_W, LINE_COLOR, HAIR_SAFE, SIDE_PAD } from '../components/CalendarParts';
+﻿// src/features/calendar/styles/calendarStyles.ts
+// -----------------------------------------------------------------------------
+// カレンダー画面 共通スタイル（全置換版 / 2025-10-22）
+// - Text用プロップ numberOfLines を style から削除（TS2345対策）
+// - .StyleSheet.absoluteFillObject の誤記を解消
+// -----------------------------------------------------------------------------
 
-export const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+import { StyleSheet, Dimensions, PixelRatio } from 'react-native';
 
-  /* ===== Overlay layers ===== */
-  layerWrap: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 10000,
-    justifyContent: 'flex-start',
-    alignItems: 'flex-start',
-  },
-  layerOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(17, 24, 39, 0.3)',
-  },
+export const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
 
-  /* ===== Header title (React Navigation header) ===== */
-  headerTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    maxWidth: SCREEN_W * 0.6,
-  },
-  headerEmojiCircle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f8fafc',
-    borderWidth: HAIR_SAFE,
-    borderColor: '#e5e7eb',
-  },
-  headerEmojiText: { fontSize: 14 },
-  headerTitleText: { fontSize: 16, fontWeight: '800', color: '#111827' },
+const hairRaw = StyleSheet.hairlineWidth;
+export const HAIR_SAFE = Math.max(hairRaw, 0.5);
 
-  /* ===== Month title & sort pills ===== */
-  monthTitle: { fontSize: 18, fontWeight: '800', color: '#111827', textAlign: 'center' },
-  sortPills: { flexDirection: 'row', backgroundColor: '#f1f5f9', borderRadius: 9999, padding: 3 },
-  pill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 9999 },
-  pillActive: { backgroundColor: '#2563eb' },
-  pillText: { fontSize: 12, color: '#334155', fontWeight: '700' },
-  pillTextActive: { color: '#fff' },
+export const LINE_W = PixelRatio.roundToNearestPixel(1.5);
 
-  /* ===== Calendar area (baseline for pageHeight/cellH) =====
-   * 邵ｦ譁ｹ蜷代・ padding / margin / border 縺ｯ蜈･繧後↑縺・ｼ磯ｫ倥＆繧ｺ繝ｬ髦ｲ豁｢・・
-   * 蟾ｦ蜿ｳ縺ｮ蜀・・菴咏區縺ｮ縺ｿ驕ｩ逕ｨ・域ｨｪ譁ｹ蜷代・ pageHeight 縺ｫ辟｡髢｢菫ゑｼ・
-   */
-  gridBlock: {
-    flex: 1,
-    minHeight: 0,
-    position: 'relative',
-    paddingTop: 0,
-    paddingBottom: 0,
-    marginTop: 0,
-    marginBottom: 0,
-    paddingLeft: SIDE_PAD,
-    paddingRight: SIDE_PAD,
-  },
+export const MONTH_TITLE_HEIGHT = 44;
+export const WEEKROW_HEIGHT = 32;
+export const DAY_CELL_MIN_HEIGHT = 64;
 
-  // CalendarList 縺ｮ逶ｴ隕ｪ縲らｸｦ菴咏區繧ｼ繝ｭ縺ｧ鬮倥＆豎壹＆縺ｪ縺・
-  gridInner: {
-    paddingTop: 0,
-    paddingBottom: 0,
-    marginTop: 0,
-    marginBottom: 0,
-  },
+export const EVENT_BAR_HEIGHT = 18;
+export const EVENT_BAR_RADIUS = 6;
+export const EVENT_GAP_V = 3;
+export const EVENT_GAP_H = 4;
 
-  /* ===== Bottom sheet ===== */
-  sheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowOffset: { width: 0, height: -2 },
-    shadowRadius: 12,
-  },
-  sheetHandleWrap: { alignItems: 'center', paddingTop: 8 },
-  sheetHandle: { width: 42, height: 5, borderRadius: 2.5, backgroundColor: '#e5e7eb' },
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: HAIR_SAFE,
-    borderBottomColor: '#eef2f7',
-    gap: 12,
-  },
-  sheetTitle: { fontSize: 16, fontWeight: '700', color: '#111827', flex: 1 },
-  sheetClose: { color: '#2563eb', fontWeight: '700' },
-  emptyContainer: { paddingVertical: 24 },
-  empty: { textAlign: 'center', color: '#6b7280' },
+export const MORE_BADGE_H = 18;
+export const MORE_BADGE_RADIUS = 9;
+export const MORE_DOT_SIZE = 4;
 
-  /* ===== Left drawer ===== */
-  drawer: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: '#ffffff',
-    borderRightWidth: HAIR_SAFE,
-    borderRightColor: '#e5e7eb',
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowOffset: { width: 2, height: 0 },
-    shadowRadius: 12,
-    paddingTop: 12,
-  },
-  drawerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 10,
-    borderBottomWidth: HAIR_SAFE,
-    borderBottomColor: '#eef2f7',
-    gap: 12,
-  },
-  drawerTitle: { fontSize: 16, fontWeight: '800', color: '#111827', flex: 1 },
-  drawerClose: { color: '#2563eb', fontWeight: '700' },
-  sectionHeader: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#6b7280',
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
+export type CalendarTheme = {
+  colors: {
+    background: string;
+    surface: string;
+    surfaceVariant?: string;
+    onSurface: string;
+    onSurfaceVariant?: string;
+    primary: string;
+    primaryContainer?: string;
+    outline: string;
+    overlay?: string;
+    focus?: string;
+    danger?: string;
+    success?: string;
+  };
+  typography?: {
+    xs?: { fontSize: number; fontWeight?: any };
+    sm?: { fontSize: number; fontWeight?: any };
+    md?: { fontSize: number; fontWeight?: any };
+    lg?: { fontSize: number; fontWeight?: any };
+  };
+  roundness?: number;
+};
 
-  /* ===== Right drawer ===== */
-  profileDrawer: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    right: 0,
-    backgroundColor: '#ffffff',
-    borderLeftWidth: HAIR_SAFE,
-    borderLeftColor: '#e5e7eb',
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowOffset: { width: -2, height: 0 },
-    shadowRadius: 12,
-    paddingTop: 12,
-  },
-  profileHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    borderBottomWidth: HAIR_SAFE,
-    borderBottomColor: '#eef2f7',
-    gap: 12,
-  },
-  profileName: { fontSize: 16, fontWeight: '800', color: '#0f172a' },
-  profileEmail: { fontSize: 12, color: '#6b7280', marginTop: 2 },
-  profileFooter: {
-    marginTop: 'auto',
-    borderTopWidth: HAIR_SAFE,
-    borderTopColor: '#eef2f7',
-    paddingVertical: 8,
-  },
-});
+export const makeCalendarStyles = (t: CalendarTheme) => {
+  const round = t.roundness ?? 12;
+
+  return StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: t.colors.background,
+    },
+
+    monthHeader: {
+      height: MONTH_TITLE_HEIGHT,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      borderBottomWidth: HAIR_SAFE,
+      borderBottomColor: t.colors.outline,
+      backgroundColor: t.colors.surface,
+    },
+    monthTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: t.colors.onSurface,
+    },
+    monthNavBtn: {
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: round,
+      backgroundColor: t.colors.surfaceVariant ?? t.colors.surface,
+    },
+    monthNavBtnText: {
+      fontSize: 14,
+      color: t.colors.onSurface,
+    },
+
+    weekHeader: {
+      height: WEEKROW_HEIGHT,
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderBottomWidth: HAIR_SAFE,
+      borderBottomColor: t.colors.outline,
+      backgroundColor: t.colors.surface,
+    },
+    weekHeaderCell: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    weekHeaderText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: t.colors.onSurfaceVariant ?? t.colors.onSurface,
+    },
+
+    monthGrid: {
+      flex: 1,
+      backgroundColor: t.colors.background,
+    },
+    weekRow: {
+      flexDirection: 'row',
+      borderBottomWidth: HAIR_SAFE,
+      borderBottomColor: t.colors.outline,
+      minHeight: DAY_CELL_MIN_HEIGHT,
+    },
+
+    dayCell: {
+      flex: 1,
+      borderRightWidth: HAIR_SAFE,
+      borderRightColor: t.colors.outline,
+      backgroundColor: t.colors.surface,
+    },
+    dayCellInner: {
+      flex: 1,
+      paddingHorizontal: 6,
+      paddingTop: 6,
+      paddingBottom: 4,
+    },
+
+    dateBadgeWrap: {
+      position: 'absolute',
+      top: 6,
+      right: 6,
+      alignItems: 'flex-end',
+    },
+    dateBadge: {
+      minWidth: 24,
+      height: 24,
+      paddingHorizontal: 6,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: t.colors.surfaceVariant ?? t.colors.surface,
+    },
+    dateBadgeText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: t.colors.onSurface,
+    },
+    dateBadgeToday: {
+      backgroundColor: t.colors.success,
+    },
+    dateBadgeTodayText: {
+      color: '#ffffff',
+    },
+    dateBadgeOutside: {
+      opacity: 0.5,
+    },
+    dateBadgeWeekend: {
+      color: t.colors.danger,
+    },
+
+    eventsWrap: {
+      marginTop: 28,
+      gap: EVENT_GAP_V,
+    },
+
+    eventBar: {
+      height: EVENT_BAR_HEIGHT,
+      borderRadius: EVENT_BAR_RADIUS,
+      paddingHorizontal: 8,
+      justifyContent: 'center',
+      marginHorizontal: EVENT_GAP_H,
+      backgroundColor: t.colors.primaryContainer ?? t.colors.primary,
+    },
+    eventBarText: {
+      fontSize: 11,
+      includeFontPadding: false,
+      color: '#ffffff',
+      fontWeight: '600',
+      // ← numberOfLines は Text の “prop” なので style に含めない
+    },
+
+    moreBadge: {
+      alignSelf: 'flex-start',
+      height: MORE_BADGE_H,
+      borderRadius: MORE_BADGE_RADIUS,
+      paddingHorizontal: 6,
+      marginHorizontal: EVENT_GAP_H,
+      backgroundColor: t.colors.surfaceVariant ?? t.colors.surface,
+      borderWidth: HAIR_SAFE,
+      borderColor: t.colors.outline,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    moreBadgeText: {
+      fontSize: 11,
+      color: t.colors.onSurface,
+      fontWeight: '600',
+    },
+
+    divider: {
+      height: HAIR_SAFE,
+      backgroundColor: t.colors.outline,
+    },
+
+    absoluteFill: {
+      ...StyleSheet.absoluteFillObject,
+    },
+
+    overlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: t.colors.overlay ?? 'rgba(0,0,0,0.35)',
+    },
+
+    focusRing: {
+      borderWidth: 2,
+      borderColor: t.colors.focus ?? t.colors.primary,
+      borderRadius: round,
+    },
+  });
+};
+
+export type CalendarStyles = ReturnType<typeof makeCalendarStyles>;
