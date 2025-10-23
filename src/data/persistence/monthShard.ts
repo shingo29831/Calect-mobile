@@ -3,43 +3,39 @@ import dayjs from '../../lib/dayjs';
 import { readFile, writeFile } from '../../store/localFile';
 import { ServerDocV2, V2Event, V2EventTagEntity } from './schemas';
 
-// 保存ファイル名は従来と同じ（内容が v2 になる）
+/* ============================== パス/キャッシュ ============================== */
+// 保存ファイル名は従来と同じ（内容は v2 ）
 const monthPath = (yyyyMM: string) => `months/${yyyyMM}.json`;
 
-// ------- ちいさなメモリキャッシュ（任意） -------
+// ちいさなメモリキャッシュ（任意）
 const monthCache = new Map<string, ServerDocV2>();
 export function clearMonthCache() {
   monthCache.clear();
 }
 
-// ====== 公開：月束ロード / 事前確保 ======
-export async function ensureMonths(months: string[]) {
-  await Promise.all(months.map(loadMonth));
+/* ============================== ユーティリティ ============================== */
+
+/** ISO日時から YYYY-MM を返す（互換ユーティリティ） */
+export function monthKeyFromISO(iso: string): string {
+  return dayjs(iso).format('YYYY-MM');
 }
 
-export async function loadMonth(yyyyMM: string): Promise<ServerDocV2> {
-  // キャッシュ
-  const hit = monthCache.get(yyyyMM);
-  if (hit) return hit;
+/** 月範囲（YYYY-MM 配列）を生成 */
+function monthSpan(startIso: string, endIso: string): string[] {
+  let s = dayjs(startIso);
+  let e = dayjs(endIso);
+  if (!s.isValid()) s = dayjs();
+  if (!e.isValid()) e = s;
+  if (e.isBefore(s)) e = s;
 
-  const path = monthPath(yyyyMM);
-  const raw = await readFile(path).catch(() => null);
-  if (!raw) {
-    const empty = emptyMonthDoc();
-    monthCache.set(yyyyMM, empty);
-    return empty;
+  const out: string[] = [];
+  let cur = s.startOf('month');
+  const last = e.startOf('month');
+  while (cur.isBefore(last) || cur.isSame(last)) {
+    out.push(cur.format('YYYY-MM'));
+    cur = cur.add(1, 'month');
   }
-  try {
-    const obj = JSON.parse(raw);
-    // v1→v2 変換を許容
-    const v2 = (obj?.version === 2) ? (obj as ServerDocV2) : migrateV1toV2(obj);
-    monthCache.set(yyyyMM, v2);
-    return v2;
-  } catch {
-    const empty = emptyMonthDoc();
-    monthCache.set(yyyyMM, empty);
-    return empty;
-  }
+  return out;
 }
 
 function emptyMonthDoc(): ServerDocV2 {
@@ -98,37 +94,53 @@ async function writeMonth(yyyyMM: string, doc: ServerDocV2) {
   monthCache.set(yyyyMM, doc);
 }
 
-// ====== ユーティリティ：月範囲（YYYY-MM 配列） ======
-function monthSpan(startIso: string, endIso: string): string[] {
-  let s = dayjs(startIso);
-  let e = dayjs(endIso);
-  if (!s.isValid()) s = dayjs();
-  if (!e.isValid()) e = s;
-  if (e.isBefore(s)) e = s;
+/* ============================== 読み込み関連 ============================== */
 
-  const out: string[] = [];
-  let cur = s.startOf('month');
-  const last = e.startOf('month');
-  while (cur.isBefore(last) || cur.isSame(last)) {
-    out.push(cur.format('YYYY-MM'));
-    cur = cur.add(1, 'month');
-  }
-  return out;
+/** 月束を事前ロード（存在しなければ空ドキュメントをキャッシュ） */
+export async function ensureMonths(months: string[]) {
+  await Promise.all(months.map(loadMonth));
 }
 
-// ====== v2 イベントの UPSERT ======
-// 期間オプションを受け取り、該当する複数月のシャードに分散保存します。
-// 呼び出し元（db.ts）は upsertEventV2(e, { start_at_iso, end_at_iso }) で渡してきます。
+/** 単一月をロード（v1→v2 マイグレーション許容、キャッシュあり） */
+export async function loadMonth(yyyyMM: string): Promise<ServerDocV2> {
+  // キャッシュ
+  const hit = monthCache.get(yyyyMM);
+  if (hit) return hit;
+
+  const path = monthPath(yyyyMM);
+  const raw = await readFile(path).catch(() => null);
+  if (!raw) {
+    const empty = emptyMonthDoc();
+    monthCache.set(yyyyMM, empty);
+    return empty;
+  }
+  try {
+    const obj = JSON.parse(raw);
+    const v2 = (obj?.version === 2) ? (obj as ServerDocV2) : migrateV1toV2(obj);
+    monthCache.set(yyyyMM, v2);
+    return v2;
+  } catch {
+    const empty = emptyMonthDoc();
+    monthCache.set(yyyyMM, empty);
+    return empty;
+  }
+}
+
+/* ============================== 書き込み（v2） ============================== */
+
 type UpsertOpts = { start_at_iso?: string; end_at_iso?: string };
 
+/**
+ * v2 イベントの UPSERT。
+ * - 期間オプションがあれば、その範囲に含まれるすべての月へ分散保存
+ * - 無ければ `updated_at` の月へ保存
+ */
 export async function upsertEventV2(e: V2Event, opts?: UpsertOpts) {
-  // 書き込む月束を決定：期間があれば期間優先、無ければ updated_at の月
   const months =
     opts?.start_at_iso && opts?.end_at_iso
       ? monthSpan(opts.start_at_iso, opts.end_at_iso)
       : [dayjs(e.updated_at).format('YYYY-MM')];
 
-  // 各月へ反映
   await Promise.all(
     months.map(async (m) => {
       const doc = await loadMonth(m);
@@ -155,4 +167,80 @@ export async function upsertEventV2(e: V2Event, opts?: UpsertOpts) {
       await writeMonth(m, doc);
     })
   );
+}
+
+/* ====================== ID置換（cid → 正規 event_id） ====================== */
+
+/**
+ * 1ヶ月ファイル内で、イベントキー `cid` を `real` にリネームする。
+ * - 既に `real` が存在する場合は、基本「上書き優先（real側を勝ち）」にする。
+ * - タグ辞書は event_id に依存していないため、そのまま。
+ */
+export async function replaceEventIdInMonth(yyyyMM: string, cid: string, real: string): Promise<boolean> {
+  const doc = await loadMonth(yyyyMM);
+  if (!doc.entities?.events) return false;
+
+  const hasCid = !!doc.entities.events[cid];
+  if (!hasCid) return false;
+
+  const src = doc.entities.events[cid];
+  const dst = doc.entities.events[real];
+
+  // real が未登録ならキー差し替え、登録済みなら「real を優先」し、必要最低限の併合
+  if (!dst) {
+    // キーを切り替える（新しいキーに移す → 旧キー削除）
+    const moved: V2Event = { ...src, event_id: real, updated_at: dayjs().toISOString() };
+    delete doc.entities.events[cid];
+    doc.entities.events[real] = moved;
+  } else {
+    // 併合（title/summary などは既存 real を優先）
+    const merged: V2Event = {
+      ...src,
+      ...dst,
+      event_id: real,
+      updated_at: dayjs().toISOString(),
+      // タグは重複排除で併合
+      tags: (() => {
+        const a = src.tags ?? [];
+        const b = dst.tags ?? [];
+        const map = new Map<string, { tag_id: string }>();
+        for (const t of a) map.set(t.tag_id, t);
+        for (const t of b) map.set(t.tag_id, t);
+        return Array.from(map.values());
+      })(),
+      // calendar_links も重複を避けて併合
+      calendar_links: (() => {
+        const a = src.calendar_links ?? [];
+        const b = dst.calendar_links ?? [];
+        const map = new Map<string, NonNullable<V2Event['calendar_links']>[number]>();
+        for (const l of a) map.set(`${l.calendar_id}::${l.link_id}`, l);
+        for (const l of b) map.set(`${l.calendar_id}::${l.link_id}`, l);
+        return Array.from(map.values());
+      })(),
+    };
+    delete doc.entities.events[cid];
+    doc.entities.events[real] = merged;
+  }
+
+  await writeMonth(yyyyMM, doc);
+  return true;
+}
+
+/**
+ * 期間に含まれるすべての月（YYYY-MM）に対して、`cid → real` の置換を実施。
+ * - start/end はオフライン作成時の “代表的な開始/終了” を渡せばOK（厳密でなくてよい）
+ */
+export async function replaceEventIdInMonthsByRange(
+  startIso: string,
+  endIso: string,
+  cid: string,
+  real: string
+): Promise<{ months: string[]; changed: string[] }> {
+  const months = monthSpan(startIso, endIso);
+  const changed: string[] = [];
+  for (const ym of months) {
+    const ok = await replaceEventIdInMonth(ym, cid, real).catch(() => false);
+    if (ok) changed.push(ym);
+  }
+  return { months, changed };
 }

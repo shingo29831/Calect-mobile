@@ -1,16 +1,70 @@
 ﻿// src/data/sync/runIncrementalSync.ts
-// クライアント側の“増分同期”ロジック。
+// クライアント側の“増分同期”ロジック（v2 以降・暫定ローカルスナップショット対応）。
 // - サーバから upserts/deletes を受け取り、ローカルスナップショットへマージ
 // - マージ結果を保存し、UI用のアプリ内DBへ反映（cid_ulid→event_id の置換もここで実施）
 
 import dayjs from "../../lib/dayjs";
-import type { Calendar, EventInstance } from "../../api/types";
-import { loadLocalStore, saveLocalStore, emptyStore } from "../persistence/localStore";
+import type { EventInstance } from "../../api/types";
 import { replaceAllInstances } from "../../store/db";
+import { readFile, writeFile } from "../../store/localFile";
+
+
+/* =========================== ローカルスナップショット・シム =========================== */
+/**
+ * 既存の ../persistence/localStore には v2 スナップショット（server.v2.json）のAPIのみが
+ * 用意されているため、本ファイルだけで完結する軽量スナップショットを定義する。
+ * - 保存先: snapshot/local.instances.v1.json
+ * - 内容  : instances[], calendars[], tombstones[], lastSyncCursor/At
+ * 画面の高速応答は store/db のメモリDB（replaceAllInstances）に委譲する。
+ */
+
+type CalendarLite = {
+  calendar_id: string;
+  name?: string;
+  color?: string | null;
+  updated_at?: string | null;
+  deleted_at?: string | null;
+};
+
+type LocalSnapshot = {
+  version: 1;
+  lastSyncCursor: string | null;
+  lastSyncAt: string | null;
+  calendars: CalendarLite[];
+  instances: EventInstance[];
+  tombstones: {
+    calendars: string[];
+    instances: Array<number | string>;
+  };
+};
+
+const SNAPSHOT_PATH = "snapshot/local.instances.v1.json";
+
+const emptyStore: LocalSnapshot = {
+  version: 1,
+  lastSyncCursor: null,
+  lastSyncAt: null,
+  calendars: [],
+  instances: [],
+  tombstones: { calendars: [], instances: [] },
+};
+
+async function loadLocalStore(): Promise<LocalSnapshot> {
+  try {
+    const raw = await readFile(SNAPSHOT_PATH);
+    const obj = JSON.parse(raw);
+    if (obj && obj.version === 1) return obj as LocalSnapshot;
+  } catch {}
+  return { ...emptyStore };
+}
+
+async function saveLocalStore(s: LocalSnapshot): Promise<void> {
+  await writeFile(SNAPSHOT_PATH, JSON.stringify(s));
+}
 
 /* ===================== サーバ応答の型 & フェッチ関数 ===================== */
 
-type UpsertCalendars = Calendar & { updated_at?: string | null; deleted_at?: string | null };
+type UpsertCalendars = CalendarLite & { updated_at?: string | null; deleted_at?: string | null };
 type UpsertInstances = EventInstance & { updated_at?: string | null; deleted_at?: string | null };
 
 type IdMapEvent = {
@@ -82,17 +136,19 @@ function applyDiffToLocal(local: LocalStore, diff: ServerDiffResponse): LocalSto
   for (const c of diff.upserts.calendars || []) {
     const prev = calMap.get(c.calendar_id);
     if (!prev || newer(c.updated_at ?? null, (prev as any)?.updated_at ?? null)) {
-      if (!(c as any).deleted_at) calMap.set(c.calendar_id, c as Calendar);
+      if (!(c as any).deleted_at) calMap.set(c.calendar_id, c as CalendarLite);
       else calMap.delete(c.calendar_id);
     }
   }
   for (const i of diff.upserts.instances || []) {
     const prev = instMap.get(i.instance_id);
-    if (!prev || newer(i.updated_at ?? null, (prev as any)?.updated_at ?? null)) {
+    if (!prev || newer((i as any).updated_at ?? null, (prev as any)?.updated_at ?? null)) {
       if (!(i as any).deleted_at) {
         const next = { ...(i as EventInstance) };
         // occurrence_key が無ければ補完
-        if (!next.occurrence_key) next.occurrence_key = computeOccurrenceKey(next);
+        if (!next.occurrence_key && next.event_id && next.start_at) {
+          next.occurrence_key = computeOccurrenceKey({ event_id: next.event_id, start_at: next.start_at });
+        }
         instMap.set(i.instance_id, next);
       } else {
         instMap.delete(i.instance_id);
@@ -112,17 +168,16 @@ function applyDiffToLocal(local: LocalStore, diff: ServerDiffResponse): LocalSto
     }
     if (cidToReal.size) {
       for (const inst of instMap.values()) {
-        // 置換候補を分解してから ?? で選ぶ（TSの '??' と '&&' 混在回避）
-        const byEvent = cidToReal.get((inst as any).event_id as string);
-        const byCid = (inst as any).cid_ulid
-          ? cidToReal.get((inst as any).cid_ulid as string)
-          : undefined;
+        const byEvent = (inst as any).event_id ? cidToReal.get((inst as any).event_id as string) : undefined;
+        const byCid   = (inst as any).cid_ulid ? cidToReal.get((inst as any).cid_ulid as string) : undefined;
         const real = byEvent ?? byCid;
 
         if (real) {
           (inst as any).cid_ulid = null;           // 一時IDはクリア（任意）
           (inst as any).event_id = real;           // 正規IDへ置換
-          (inst as any).occurrence_key = computeOccurrenceKey(inst);
+          if ((inst as any).start_at) {
+            (inst as any).occurrence_key = computeOccurrenceKey({ event_id: real, start_at: (inst as any).start_at });
+          }
         }
       }
     }
