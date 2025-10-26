@@ -47,6 +47,7 @@ import { useMonthEvents } from '../hooks/useMonthEvents';
 import { styles } from '../styles/calendarStyles';
 import { useAppTheme } from '../../../theme';
 import type { ServerDocV2 } from '../../../data/persistence/schemas';
+import { EventVisibility } from 'src/api/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Calendar'>;
 type SortMode = 'span' | 'start';
@@ -584,16 +585,30 @@ export default function CalendarScreen({ navigation }: Props) {
   const [formSummary, setFormSummary] = useState('');
   const [formAllDay, setFormAllDay] = useState(false);
   const [formColor, setFormColor] = useState<string>('');
+  const [formVisibility, setFormVisibility] = useState<EventVisibility>('Hidden');
+  const [formTz, setFormTz] = useState<string>('');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
 
   const [allTags, setAllTags] = useState<string[]>([]);
   useEffect(() => { setAllTags(getAllTags()); }, [addVisible]);
 
+  //RRULE
+  const [FREQ, setFREQ] = useState<string>('NONE');
+  const [COUNT, setCOUNT] = useState<string>('NONE');
+  const [INTERVAL, setINTERVAL] = useState<string>('NONE');
+  const [BYDAY, setBYDAY] = useState<string>('NONE');
+  const [BYMONTHDAY, setBYMONTHDAY] = useState<string>('NONE');
+  const [BYYEARDAY, setBYYEARDAY] = useState<string>('NONE');
+  const [BYWEEKNO, setBYWEEKNO] = useState<string>('NONE');
+  const [BYMONTH, setBYMONTH] = useState<string>('NONE');
+  const [BYYEAR, setBYYEAR] = useState<string>('NONE');
+  const [BYSETPOS, setBYSETPOS] = useState<string>('NONE');
+
   const [startDate, setStartDate] = useState<string>(dayjs().format('YYYY-MM-DD'));
   const [endDate, setEndDate]     = useState<string>(dayjs().format('YYYY-MM-DD'));
   const [startTime, setStartTime] = useState<string>('10:00');
-  const [endTime, setEndTime]     = useState<string>('11:00');
+  const [endTime, setEndTime]     = useState<string>('15:00');
 
   const [startCalOpen, setStartCalOpen] = useState(false);
   const [endCalOpen, setEndCalOpen]     = useState(false);
@@ -1077,10 +1092,17 @@ export default function CalendarScreen({ navigation }: Props) {
         calendar_id: formCalId,
         title: formTitle.trim(),
         summary: formSummary.trim(),
+
+        rrule: FREQ ?? '',
+        start_at: st,
+        end_at: et,
+        dtstart: sDate,
+        dtend: eDate,
+        tz: formTz ?? 'local',
+
         color: validColor,
-        style: tags.length ? { tags } : undefined,
-        start_at: startIso,
-        end_at:   endIso,
+        tags: tags.length ?  tags : [] ,
+        visibility: formVisibility ?? 'Normal',
       });
 
       if (tags.length) setAllTags(getAllTags());

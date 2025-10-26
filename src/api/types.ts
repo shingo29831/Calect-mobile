@@ -10,9 +10,13 @@ export type ULID = string;          // "01JC2X7M3A9Z6..." (Crockford Base32 26�
 export type Base62 = string;        // 共有リンクなど
 export type ISODate = string;       // "2025-10-03"
 export type ISODateTime = string;   // "2025-10-03T12:34:56Z" or "...+09:00"
+export type Time = string;         // "hh:mm"
 export type HexColor = string;      // "#2563EB" / "#e4a982ff"
 
 export type YesNoBool = boolean | 'true' | 'false'; // JSON混在対策（段階移行用）
+
+export type EventVisibility = 'Hidden' | 'Busy' | 'Title' | 'Summary';
+export type PriorityLevel = 'Low' | 'Normal' | 'High';
 
 // ------------------------------------------------------
 // v2 Server Document (サーバが返すルートJSONの型)
@@ -111,7 +115,7 @@ export type ServerDocV2 = {
       calendar_shares: Array<{
         user_id: ULID | null;
         group_id: ULID | null;
-        content_visibility: 'busy' | 'summary' | 'full';
+        content_visibility: EventVisibility;
       }>;
       updated_at: ISODateTime;
       deleted_at: ISODateTime | null;
@@ -121,13 +125,21 @@ export type ServerDocV2 = {
       event_id: ULID;
       title: string;
       summary: string | null;
+
+      rrule: string;                       // RFC5545
+      start_at: Time;                    // "HH:mm"
+      end_at: Time;                      // "HH:mm"
+      dtstart: ISODate;                    // series start
+      dtend: ISODate;               // series end
+      tz: string;
+
       color: HexColor | null;
 
       // 1イベントが複数カレンダーへ「リンク」される（mirror/alias/copy など）
       calendar_links: Array<{
         link_id: string;                     // ULID/Base62 任意
         calendar_id: ULID;
-        content_visibility: 'busy'|'summary'|'full';
+        content_visibility: EventVisibility;
         role?: 'mirror' | 'alias' | 'copy';
         created_by: ULID;
         updated_at: ISODateTime;
@@ -137,31 +149,22 @@ export type ServerDocV2 = {
       event_shares: Array<{
         user_id: ULID | null;
         group_id: ULID | null;
-        content_visibility: 'busy' | 'summary' | 'full';
+        content_visibility: EventVisibility
       }>;
 
-      followers_share: YesNoBool;
+      //followers_share: YesNoBool; // フォロワーへの共有はevent_sharesに統合
       link_token: Base62 | null;             // 22–32桁推奨・TTL運用
 
-      priority: 'low' | 'normal' | 'high';
-
-      recurrence?: {
-        rrule: string;                       // RFC5545
-        tz: string;
-        start_at: string;                    // "HH:mm"
-        end_at: string;                      // "HH:mm"
-        dtstart: ISODate;                    // series start
-        until: ISODate | null;               // series end
-      };
+      priority: PriorityLevel;
 
       overrides?: Array<{
         occurrence_date: ISODate;
         cancelled?: YesNoBool;
         title?: string;
         summary?: string;
-        start_at?: string;                   // "HH:mm"
-        end_at?: string;                     // "HH:mm"
-        priority?: 'low'|'normal'|'high';
+        start_at?: Time;                   // "HH:mm"
+        end_at?: Time;                     // "HH:mm"
+        priority?: PriorityLevel;
       }>;
 
       tags?: Array<{ tag_id: ULID }>;
@@ -215,7 +218,7 @@ export type ServerDocV2 = {
 //   - 既存コードが参照している Event / EventInstance を維持
 //   - recurrence 展開は月シャードで実施
 // ------------------------------------------------------
-export type EventVisibility = 'private' | 'busy' | 'summary' | 'full';
+
 
 export type Event = {
   event_id: ULID;                // サーバ確定ID or 一時ID(=cid_ulid)
@@ -223,9 +226,15 @@ export type Event = {
   calendar_id: ULID;             // UIが選んだ表示元カレンダー
   title: string;
   summary: string | null;
-  start_at: ISODateTime;         // インスタンス化後の開始
-  end_at: ISODateTime;           // インスタンス化後の終了
+  rrule: string;                       // RFC5545
+  start_at: Time;                    // "HH:mm"
+  end_at: Time;                      // "HH:mm"
+  dtstart: ISODate;                    // series start
+  dtend: ISODate;               // series end
+  tz: string | 'local';
+  tags?: string[];
   visibility: EventVisibility;
+  priority: PriorityLevel;
 };
 
 export type EventInstance = {
@@ -234,8 +243,16 @@ export type EventInstance = {
   cid_ulid?: ULID | null;
   calendar_id: ULID;
   title: string;
-  start_at: ISODateTime;
-  end_at: ISODateTime;
+  summary: string | null;
+  rrule: string;                       // RFC5545
+  start_at: Time;                    // "HH:mm"
+  end_at: Time;                      // "HH:mm"
+  dtstart: ISODate;                    // series start
+  dtend: ISODate;               // series end
+  tz: string | 'local';
+  tags?: string[];
+  visibility: EventVisibility;
+  priority: PriorityLevel;
   occurrence_key?: string;       // `${event_id}@@${start_at}`
 };
 
