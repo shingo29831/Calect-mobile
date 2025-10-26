@@ -1746,27 +1746,13 @@ export default function CalendarScreen({ navigation }: Props) {
 
                   {/* 色 (#HEX) + プレビュー + パレットを開く */}
                   <View style={{ gap: 8, marginBottom: 12, marginTop: 12 }}>
-                    <Text style={{ fontSize: 12, color: theme.textSecondary }}>色 (#HEX)</Text>
+                    <Text style={{ fontSize: 12, color: theme.textSecondary }}>色</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                      <TextInput
-                        value={formColor}
-                        onChangeText={setFormColor}
-                        autoCapitalize="none"
-                        placeholder="#2563EB"
-                        placeholderTextColor={theme.textSecondary}
-                        selectionColor={theme.accent}
-                        style={{
-                          flex: 1,
-                          borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
-                          paddingHorizontal: 12, paddingVertical: 10, fontSize: 16,
-                          color: theme.textPrimary, backgroundColor: theme.appBg,
-                        }}
-                      />
                       {/* 現在色プレビュー */}
                       <View
                         style={{
                           width: 36, height: 36, borderRadius: 8,
-                          backgroundColor: /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test((formColor || '').trim()) ? formColor : 'transparent',
+                          backgroundColor: /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test((formColor || '').trim()) ? formColor : '#2563EB',
                           borderWidth: HAIR_SAFE, borderColor: theme.border
                         }}
                       />
