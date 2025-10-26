@@ -354,6 +354,7 @@ const useMeasure = () => {
 };
 
 /** Hue 連続バー */
+// 置換対象: 「HueBar」コンポーネント全体
 const HueBar = ({
   hue,
   onChange,
@@ -375,9 +376,13 @@ const HueBar = ({
     [size.w, onChange]
   );
 
+  // ★ 高さを 22 → 16 に、マーカーも小さく
+  const BAR_H = 16;
+  const MARK = 12;
+
   return (
-    <View style={{ height: 22, borderRadius: 6, overflow: 'hidden', borderWidth: HAIR_SAFE, borderColor: theme.border }}>
-      <View ref={ref as any} onLayout={onLayout} style={{ height: 22 }}>
+    <View style={{ height: BAR_H, borderRadius: 6, overflow: 'hidden', borderWidth: HAIR_SAFE, borderColor: theme.border }}>
+      <View ref={ref as any} onLayout={onLayout} style={{ height: BAR_H }}>
         <LinearGradient
           colors={[0, 60, 120, 180, 240, 300, 360].map((h) => hsvToHex(h, 1, 1))}
           start={{ x: 0, y: 0 }}
@@ -396,21 +401,21 @@ const HueBar = ({
           onResponderRelease={() => onDragStateChange?.(false)}
           onResponderTerminate={() => onDragStateChange?.(false)}
         />
-        {/* 現在位置マーカー */}
+        {/* 現在位置マーカー（14→12） */}
         <View
           style={{
             position: 'absolute',
-            left: clamp01(hue / 360) * Math.max(1, size.w) - 7,
-            top: 11 - 7,
-            width: 14,
-            height: 14,
-            borderRadius: 7,
+            left: clamp01(hue / 360) * Math.max(1, size.w) - MARK / 2,
+            top: BAR_H / 2 - MARK / 2,
+            width: MARK,
+            height: MARK,
+            borderRadius: MARK / 2,
             borderWidth: 2,
             borderColor: theme.surface,
             backgroundColor: hsvToHex(hue, 1, 1),
             shadowColor: '#000',
-            shadowOpacity: 0.25,
-            shadowRadius: 4,
+            shadowOpacity: 0.2,
+            shadowRadius: 3,
             shadowOffset: { width: 0, height: 1 },
           }}
         />
@@ -418,6 +423,7 @@ const HueBar = ({
     </View>
   );
 };
+
 
 
 /** SV 連続ピッカー（ピクセル単位） */
@@ -452,25 +458,26 @@ const SVPicker = ({
   const markerX = clamp01(s) * Math.max(1, size.w);
   const markerY = (1 - clamp01(v)) * Math.max(1, size.h);
 
+  // ★ 角丸を 12 → 10、マーカーを 18 → 14
+  const R = 10;
+  const MARK = 14;
+
   return (
     <View
       ref={ref as any}
       onLayout={onLayout}
       style={{
         aspectRatio: 1,
-        borderRadius: 12,
+        borderRadius: R,
         overflow: 'hidden',
         borderWidth: HAIR_SAFE,
         borderColor: theme.border,
       }}
     >
-      {/* ベース：Hue フル彩度・フル明度 */}
       <View style={[StyleSheet.absoluteFill, { backgroundColor: hsvToHex(hue, 1, 1) }]} />
-      {/* 左→右：白→透明（彩度） */}
       <LinearGradient colors={['#FFFFFF', '#FFFFFF00']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
-      {/* 上→下：透明→黒（明度） */}
       <LinearGradient colors={['#00000000', '#000000FF']} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={StyleSheet.absoluteFill} />
-      {/* タッチレイヤ */}
+
       <View
         style={StyleSheet.absoluteFill}
         onStartShouldSetResponder={() => true}
@@ -483,21 +490,22 @@ const SVPicker = ({
         onResponderRelease={() => onDragStateChange?.(false)}
         onResponderTerminate={() => onDragStateChange?.(false)}
       />
-      {/* マーカー */}
+
+      {/* マーカー（18→14） */}
       <View
         style={{
           position: 'absolute',
-          left: markerX - 9,
-          top: markerY - 9,
-          width: 18,
-          height: 18,
-          borderRadius: 9,
+          left: markerX - MARK / 2,
+          top: markerY - MARK / 2,
+          width: MARK,
+          height: MARK,
+          borderRadius: MARK / 2,
           borderWidth: 2,
           borderColor: '#fff',
           backgroundColor: hsvToHex(hue, s, v),
           shadowColor: '#000',
-          shadowOpacity: 0.25,
-          shadowRadius: 4,
+          shadowOpacity: 0.2,
+          shadowRadius: 3,
           shadowOffset: { width: 0, height: 1 },
         }}
       />
@@ -2007,18 +2015,18 @@ export default function CalendarScreen({ navigation }: Props) {
       {/* ====== Color Palette Overlay ====== */}
       {addVisible && colorOpen && (
         <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 20012 }}>
-          {/* 背景タップで閉じる（反映しない） */}
           <Pressable onPress={() => setColorOpen(false)} style={StyleSheet.absoluteFillObject}>
             <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }} />
           </Pressable>
 
-          {/* 本体カード（高さ制限：中身スクロール、下部フッターは固定） */}
           <View
             style={{
               position: 'absolute',
-              top: Math.floor(SCREEN_H * 0.10),
+              // ★ 上に寄せる：10% → 4%
+              top: Math.floor(SCREEN_H * 0.04),
               alignSelf: 'center',
-              width: Math.min(460, SCREEN_W - 16),
+              // ★ 幅を少しスリム化
+              width: Math.min(420, SCREEN_W - 10),
               maxHeight: Math.floor(SCREEN_H * 0.80),
               borderRadius: 16,
               backgroundColor: theme.surface,
@@ -2031,48 +2039,50 @@ export default function CalendarScreen({ navigation }: Props) {
               overflow: 'hidden',
             }}
           >
-            {/* ---------- 上：スクロール領域 ---------- */}
+            {/* 上：スクロール領域 */}
             <View style={{ flex: 1 }}>
               <ScrollView
                 contentContainerStyle={{ padding: 16, paddingBottom: 16 }}
                 keyboardShouldPersistTaps="handled"
                 scrollEnabled={!draggingColor}
               >
-                <Text style={{ fontSize: 16, fontWeight: '800', color: theme.textPrimary, marginBottom: 10 }}>
+                <Text style={{ fontSize: 15, fontWeight: '800', color: theme.textPrimary, marginBottom: 10 }}>
                   カラーを選択
                 </Text>
 
-                {/* プレビュー（左：現在 / 右：選択中） */}
+                {/* プレビュー（左右） */}
                 <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center', marginBottom: 12 }}>
                   <View style={{ flex: 1, alignItems: 'center' }}>
-                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>現在</Text>
+                    <Text style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 6 }}>現在</Text>
                     <View style={{
-                      width: 56, height: 56, borderRadius: 12,
+                      width: 52, height: 52, borderRadius: 12,
                       backgroundColor: /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test((formColor || '').trim()) ? formColor : 'transparent',
                       borderWidth: HAIR_SAFE, borderColor: theme.border
                     }} />
                   </View>
                   <View style={{ flex: 1, alignItems: 'center' }}>
-                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>選択中</Text>
+                    <Text style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 6 }}>選択中</Text>
                     <View style={{
-                      width: 56, height: 56, borderRadius: 12,
+                      width: 52, height: 52, borderRadius: 12,
                       backgroundColor: tempColor,
                       borderWidth: HAIR_SAFE, borderColor: theme.border
                     }} />
                   </View>
                 </View>
 
-                {/* よく使う色（チップ） */}
-                <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 8 }}>共通カラー</Text>
+                {/* 共通カラー（チップ） */}
+                <Text style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 8 }}>共通カラー</Text>
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={{ paddingBottom: 4 }}
                   style={{ marginBottom: 12 }}
                 >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     {COLOR_PALETTE.map((hex) => {
                       const selected = tempColor.toLowerCase() === hex.toLowerCase();
+                      // ★ チップ 32→24
+                      const CHIP = 24;
                       return (
                         <Pressable
                           key={hex}
@@ -2084,9 +2094,9 @@ export default function CalendarScreen({ navigation }: Props) {
                             setSvV(v);
                           }}
                           style={{
-                            width: 32,
-                            height: 32,
-                            borderRadius: 16,
+                            width: CHIP,
+                            height: CHIP,
+                            borderRadius: CHIP / 2,
                             backgroundColor: hex,
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -2096,7 +2106,7 @@ export default function CalendarScreen({ navigation }: Props) {
                           }}
                           accessibilityLabel={`色 ${hex}`}
                         >
-                          {selected && <Text style={{ color: '#fff', fontSize: 14, fontWeight: '900' }}>✓</Text>}
+                          {selected && <Text style={{ color: '#fff', fontSize: 12, fontWeight: '900' }}>✓</Text>}
                         </Pressable>
                       );
                     })}
@@ -2110,9 +2120,9 @@ export default function CalendarScreen({ navigation }: Props) {
                         setSvV(v);
                       }}
                       style={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: 16,
+                        width: 24,
+                        height: 24,
+                        borderRadius: 12,
                         backgroundColor: '#FFFFFF',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -2121,57 +2131,53 @@ export default function CalendarScreen({ navigation }: Props) {
                       }}
                       accessibilityLabel="白"
                     >
-                      <Text style={{ color: '#000', fontSize: 12 }}>□</Text>
+                      <Text style={{ color: '#000', fontSize: 10 }}>□</Text>
                     </Pressable>
                   </View>
                 </ScrollView>
-                {/* ===== Hue バー（連続グラデ） ===== */}
-                <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>色相（Hue）</Text>
-                <HueBar
-                  hue={hue}
-                  onChange={(h) => {
-                    setHue(h);
-                    setTempColor(hsvToHex(h, svS, svV));
-                  }}
-                  theme={theme}
-                  onDragStateChange={setDraggingColor}
-                />
 
-                <SVPicker
-                  hue={hue}
-                  s={svS}
-                  v={svV}
-                  onChange={(s, v) => {
-                    setSvS(s);
-                    setSvV(v);
-                    setTempColor(hsvToHex(hue, s, v));
-                  }}
-                  theme={theme}
-                  onDragStateChange={setDraggingColor}
-                />
+                {/* Hue / SV を中央寄せ・最大幅 280 に制限 */}
+                <View style={{ alignSelf: 'center', width: 350, gap: 10 }}>
+                  <Text style={{ fontSize: 11, color: theme.textSecondary }}>色相（Hue）</Text>
+                  <HueBar
+                    hue={hue}
+                    onChange={(h) => {
+                      setHue(h);
+                      setTempColor(hsvToHex(h, svS, svV));
+                    }}
+                    theme={theme}
+                    onDragStateChange={setDraggingColor}
+                  />
+
+                  <SVPicker
+                    hue={hue}
+                    s={svS}
+                    v={svV}
+                    onChange={(s, v) => {
+                      setSvS(s);
+                      setSvV(v);
+                      setTempColor(hsvToHex(hue, s, v));
+                    }}
+                    theme={theme}
+                    onDragStateChange={setDraggingColor}
+                  />
+                </View>
               </ScrollView>
             </View>
 
-            {/* ---------- 下：フッター（固定） ---------- */}
-            <View style={{ padding: 14, borderTopWidth: HAIR_SAFE, borderColor: theme.border, backgroundColor: theme.surface }}>
+            {/* 下：フッター（固定） */}
+            <View style={{ padding: 12, borderTopWidth: HAIR_SAFE, borderColor: theme.border, backgroundColor: theme.surface }}>
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <Pressable
                   onPress={() => setColorOpen(false)}
-                  style={{ width: 108, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+                  style={{ width: 100, height: 42, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
                     borderWidth: HAIR_SAFE, borderColor: theme.border, backgroundColor: theme.surface }}
                 >
                   <Text style={{ color: theme.textPrimary, fontWeight: '800' }}>キャンセル</Text>
                 </Pressable>
-                {/* <Pressable
-                  onPress={() => { setFormColor(''); setColorOpen(false); }}
-                  style={{ width: 108, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
-                    borderWidth: HAIR_SAFE, borderColor: theme.border, backgroundColor: theme.appBg }}
-                >
-                  <Text style={{ color: theme.textPrimary, fontWeight: '800' }}>クリア</Text>
-                </Pressable> */}
                 <Pressable
                   onPress={() => { setFormColor(tempColor); setColorOpen(false); }}
-                  style={{ flex: 1, width: 108, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.accent }}
+                  style={{ flex: 1, height: 42, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.accent }}
                 >
                   <Text style={{ color: theme.accentText, fontWeight: '800' }}>決定</Text>
                 </Pressable>
@@ -2180,6 +2186,7 @@ export default function CalendarScreen({ navigation }: Props) {
           </View>
         </View>
       )}
+
 
     </View>
   );
