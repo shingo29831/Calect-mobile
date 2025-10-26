@@ -2,17 +2,16 @@
 // クライアント側の“増分同期”ロジック（v2 以降・暫定ローカルスナップショット対応）。
 // - サーバから upserts/deletes を受け取り、ローカルスナップショットへマージ
 // - マージ結果を保存し、UI用のアプリ内DBへ反映（cid_ulid→event_id の置換もここで実施）
+// ★空差分で UI の表示が消えないように、"変更が無い場合は replaceAllInstances を呼ばない" ガードを追加。
+// ★初回でスナップショットが無い場合は、メモリDB（getAllInstances）を“種”として保存してから同期する。
 
 import dayjs from "../../lib/dayjs";
 import type { EventInstance } from "../../api/types";
-import { replaceAllInstances } from "../../store/db";
+import { getAllInstances, replaceAllInstances } from "../../store/db";
 import { readFile, writeFile } from "../../store/localFile";
-
 
 /* =========================== ローカルスナップショット・シム =========================== */
 /**
- * 既存の ../persistence/localStore には v2 スナップショット（server.v2.json）のAPIのみが
- * 用意されているため、本ファイルだけで完結する軽量スナップショットを定義する。
  * - 保存先: snapshot/local.instances.v1.json
  * - 内容  : instances[], calendars[], tombstones[], lastSyncCursor/At
  * 画面の高速応答は store/db のメモリDB（replaceAllInstances）に委譲する。
@@ -117,32 +116,39 @@ function computeOccurrenceKey(it: Pick<EventInstance, "event_id" | "start_at">) 
 /* =============================== マージ処理本体 =============================== */
 
 type LocalStore = Awaited<ReturnType<typeof loadLocalStore>>;
+type ApplyResult = { next: LocalStore; changed: boolean };
 
 /**
- * diff をローカルへ適用し、必要なら id_maps（cid→正規ID）も反映した LocalStore を返す。
+ * diff をローカルへ適用し、必要なら id_maps（cid→正規ID）も反映。
+ * さらに「ローカルに変更が発生したか」を返す（UI 全消去を防ぐため）。
  */
-function applyDiffToLocal(local: LocalStore, diff: ServerDiffResponse): LocalStore {
+function applyDiffToLocal(local: LocalStore, diff: ServerDiffResponse): ApplyResult {
   // 現状のローカルを Map 化
   const calMap = indexBy(local.calendars, "calendar_id");
   const instMap = indexBy(local.instances, "instance_id");
 
+  let changed = false;
+
   // 明示的 delete の反映
   const delCals = new Set(diff.deletes?.calendars ?? []);
   const delInst = new Set(diff.deletes?.instances ?? []);
-  for (const id of delCals) calMap.delete(id);
-  for (const id of delInst) instMap.delete(id);
+  for (const id of delCals) { if (calMap.delete(id)) changed = true; }
+  for (const id of delInst) { if (instMap.delete(id)) changed = true; }
 
   // upserts（updated_at が新しければ置き換え／deleted_at があれば除去）
   for (const c of diff.upserts.calendars || []) {
     const prev = calMap.get(c.calendar_id);
-    if (!prev || newer(c.updated_at ?? null, (prev as any)?.updated_at ?? null)) {
+    const should = !prev || newer(c.updated_at ?? null, (prev as any)?.updated_at ?? null);
+    if (should) {
       if (!(c as any).deleted_at) calMap.set(c.calendar_id, c as CalendarLite);
       else calMap.delete(c.calendar_id);
+      changed = true;
     }
   }
   for (const i of diff.upserts.instances || []) {
     const prev = instMap.get(i.instance_id);
-    if (!prev || newer((i as any).updated_at ?? null, (prev as any)?.updated_at ?? null)) {
+    const should = !prev || newer((i as any).updated_at ?? null, (prev as any)?.updated_at ?? null);
+    if (should) {
       if (!(i as any).deleted_at) {
         const next = { ...(i as EventInstance) };
         // occurrence_key が無ければ補完
@@ -153,13 +159,13 @@ function applyDiffToLocal(local: LocalStore, diff: ServerDiffResponse): LocalSto
       } else {
         instMap.delete(i.instance_id);
       }
+      changed = true;
     }
   }
 
   // ★ cid_ulid → event_id の置換（id_maps）
   const maps = diff.id_maps ?? [];
   if (maps.length) {
-    // event 単位の置換のみを想定
     const cidToReal = new Map<string, string>();
     for (const m of maps) {
       if (m.entity === "event" && m.cid_ulid && m.event_id) {
@@ -178,6 +184,7 @@ function applyDiffToLocal(local: LocalStore, diff: ServerDiffResponse): LocalSto
           if ((inst as any).start_at) {
             (inst as any).occurrence_key = computeOccurrenceKey({ event_id: real, start_at: (inst as any).start_at });
           }
+          changed = true;
         }
       }
     }
@@ -201,30 +208,48 @@ function applyDiffToLocal(local: LocalStore, diff: ServerDiffResponse): LocalSto
       ],
     },
   };
-  return next;
+  return { next, changed };
 }
 
 /* =============================== 公開エントリ =============================== */
 
 /**
  * サーバから差分を取得し、ローカルへ適用 → 保存 → UI DB へ反映
+ * - 変更が無いときは UI 反映をスキップ（表示が消える事故を防止）
+ * - 初回スナップショットが無い場合は、メモリDBを種にして保存してから同期
  */
 export async function runIncrementalSync(fetchServerDiff: FetchServerDiff) {
-  // 1) ローカルの現在値を読む（壊れていたら空テンプレ）
-  const local = await loadLocalStore().catch(() => ({ ...emptyStore }));
+  // 1) ローカルの現在値を読む
+  let local = await loadLocalStore().catch(() => ({ ...emptyStore }));
+
+  // ★スナップショットが空なら、現在のメモリDBを“種”として保存（初回の全消し防止）
+  if (!local.instances?.length) {
+    const seed = getAllInstances?.() ?? [];
+    if (seed.length) {
+      local = {
+        ...local,
+        instances: seed,
+        lastSyncAt: local.lastSyncAt ?? dayjs().toISOString(),
+      };
+      await saveLocalStore(local);
+    }
+  }
+
   const since = local.lastSyncCursor ?? null;
 
   // 2) サーバから差分を取得
   const diff = await fetchServerDiff(since);
 
   // 3) ローカルへマージ（cid→正規ID 置換もここで）
-  const merged = applyDiffToLocal(local, diff);
+  const { next: merged, changed } = applyDiffToLocal(local, diff);
 
   // 4) 保存
   await saveLocalStore(merged);
 
-  // 5) UI用の“アプリ内DB”へ反映
-  replaceAllInstances(merged.instances);
+  // 5) UI用の“アプリ内DB”へ反映（★変更がある場合のみ）
+  if (changed) {
+    replaceAllInstances(merged.instances);
+  }
 
   if (__DEV__) {
     // eslint-disable-next-line no-console
@@ -232,7 +257,8 @@ export async function runIncrementalSync(fetchServerDiff: FetchServerDiff) {
       "[sync]",
       "instances:", merged.instances.length,
       "cursor:", merged.lastSyncCursor,
-      "id_maps:", (diff.id_maps?.length ?? 0)
+      "id_maps:", (diff.id_maps?.length ?? 0),
+      "changed:", changed
     );
   }
 
@@ -243,6 +269,7 @@ export async function runIncrementalSync(fetchServerDiff: FetchServerDiff) {
 
 /**
  * 例: サーバが未実装の間のダミー差分取得
+ * - 初回/空差分でも UI を空更新しないよう、最低限 cursor のみを返す。
  */
 export async function exampleFetchServerDiff(since: string | null): Promise<ServerDiffResponse> {
   // 本来は:
@@ -260,7 +287,6 @@ export async function exampleFetchServerDiff(since: string | null): Promise<Serv
       calendars: [],
       instances: [],
     },
-    // 例: オフライン作成で cid=... が event_id=... に確定したとき
     // id_maps: [{ entity: "event", cid_ulid: "01H...CID", event_id: "01J...REAL" }],
   };
 }
