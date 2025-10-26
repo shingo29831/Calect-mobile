@@ -2168,21 +2168,40 @@ export default function CalendarScreen({ navigation }: Props) {
             {/* 下：フッター（固定） */}
             <View style={{ padding: 12, borderTopWidth: HAIR_SAFE, borderColor: theme.border, backgroundColor: theme.surface }}>
               <View style={{ flexDirection: 'row', gap: 10 }}>
+                {/* キャンセル：4割 */}
                 <Pressable
                   onPress={() => setColorOpen(false)}
-                  style={{ width: 100, height: 42, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
-                    borderWidth: HAIR_SAFE, borderColor: theme.border, backgroundColor: theme.surface }}
+                  style={{
+                    flex: 4,
+                    height: 42,
+                    borderRadius: 10,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderWidth: HAIR_SAFE,
+                    borderColor: theme.border,
+                    backgroundColor: theme.surface,
+                  }}
                 >
                   <Text style={{ color: theme.textPrimary, fontWeight: '800' }}>キャンセル</Text>
                 </Pressable>
+
+                {/* 決定：6割 */}
                 <Pressable
                   onPress={() => { setFormColor(tempColor); setColorOpen(false); }}
-                  style={{ flex: 1, height: 42, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.accent }}
+                  style={{
+                    flex: 6,
+                    height: 42,
+                    borderRadius: 10,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: theme.accent,
+                  }}
                 >
                   <Text style={{ color: theme.accentText, fontWeight: '800' }}>決定</Text>
                 </Pressable>
               </View>
             </View>
+
           </View>
         </View>
       )}
