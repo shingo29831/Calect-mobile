@@ -69,7 +69,7 @@ export type EntityItem = {
 export type EventSegment = {
   instance_id: number | string;
   title: string;
-  color?: string | null;
+  color?: string | null;     // ← イベントJSONのcolor（#RRGGBB | #RRGGBBAA）
   spanLeft: boolean;
   spanRight: boolean;
   showTitle?: boolean;
@@ -109,6 +109,51 @@ export function getPrevCurrNextRange(baseYYYYMM?: string) {
 
   const fmt = (d: dayjs.Dayjs) => d.format('YYYY-MM-DD[T]HH:mm:ss[Z]');
   return { startISO: fmt(start), endISO: fmt(end) };
+}
+
+/* ====== 色ユーティリティ（追記） ====== */
+const HEX_RE = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i;
+const HEX6_RE = /^#([0-9a-f]{6})$/i;
+const HEX8_RE = /^#([0-9a-f]{8})$/i;
+
+function isValidHex(hex?: string | null): hex is string {
+  return !!hex && HEX_RE.test(hex.trim());
+}
+function hasAlpha(hex: string) {
+  return HEX8_RE.test(hex);
+}
+function addAlpha(hex6: string, alpha: number) {
+  // alpha: 0.0 - 1.0
+  const a = Math.max(0, Math.min(1, alpha));
+  const aa = Math.round(a * 255)
+    .toString(16)
+    .padStart(2, '0');
+  if (HEX8_RE.test(hex6)) return hex6; // もともとAA付きならそのまま
+  if (!HEX6_RE.test(hex6)) return hex6;
+  return `${hex6}${aa}`;
+}
+function hexToRGB(hex: string) {
+  // #RRGGBB(AA) → {r,g,b}
+  const h = hex.replace('#', '');
+  const is8 = h.length === 8;
+  const rr = parseInt(h.slice(0, 2), 16);
+  const gg = parseInt(h.slice(2, 4), 16);
+  const bb = parseInt(h.slice(4, 6), 16);
+  const aa = is8 ? parseInt(h.slice(6, 8), 16) : 255;
+  return { r: rr, g: gg, b: bb, a: aa / 255 };
+}
+function relativeLuminance({ r, g, b }: { r: number; g: number; b: number }) {
+  const toL = (c: number) => {
+    const x = c / 255;
+    return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * toL(r) + 0.7152 * toL(g) + 0.0722 * toL(b);
+}
+function readableTextColor(bgHex: string) {
+  const { r, g, b } = hexToRGB(bgHex);
+  const L = relativeLuminance({ r, g, b });
+  // 明るい背景なら黒、暗いなら白
+  return L > 0.5 ? '#000000' : '#ffffff';
 }
 
 /* ===== UI: 週ヘッダ ===== */
@@ -287,9 +332,21 @@ export const DayCell = React.memo(function DayCell({
             );
           }
 
-          const baseColor = ev.color || theme.eventDefaultFg;
-          const bg = `${baseColor}22`;
-          const borderColor = baseColor;
+          // ====== ここが「color」を反映する肝 ======
+          // 優先: ev.color（#RRGGBB | #RRGGBBAA）→ 不正なら theme.eventDefaultFg を使用
+          const chosen = isValidHex(ev.color) ? ev.color!.trim() : (theme.eventDefaultFg ?? DEFAULT_EVENT_COLOR);
+          const baseSolid = hasAlpha(chosen) ? `#${chosen.replace('#','').slice(0,6)}` : chosen;
+
+          // 背景は:
+          //  - ev.color が #RRGGBBAA ならそれをそのまま使う
+          //  - #RRGGBB の場合はアルファ(約0.14)を付与して薄いバーに
+          const bg = hasAlpha(chosen) ? chosen : addAlpha(baseSolid, 0.14);
+
+          // 枠線は不透明なベース（読みやすさ向上）
+          const borderColor = baseSolid;
+
+          // テキスト色はベース色の明度で白/黒を自動選択
+          const labelColor = readableTextColor(baseSolid);
 
           const radiusLeft = ev.spanLeft ? 0 : EVENT_BAR_RADIUS;
           const radiusRight = ev.spanRight ? 0 : EVENT_BAR_RADIUS;
@@ -324,7 +381,7 @@ export const DayCell = React.memo(function DayCell({
                 <Text
                   numberOfLines={1}
                   ellipsizeMode="tail"
-                  style={{ fontSize: EVENT_TEXT_SIZE, color: theme.textPrimary, fontWeight: '600' }}
+                  style={{ fontSize: EVENT_TEXT_SIZE, color: labelColor, fontWeight: '700' }}
                 >
                   {titleText}
                 </Text>

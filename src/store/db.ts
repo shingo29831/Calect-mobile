@@ -10,7 +10,7 @@
 // ===============================================
 
 import dayjs from '../lib/dayjs';
-import type { EventInstance, Event, ULID } from '../api/types';
+import type { EventInstance, Event, ULID, HexColor } from '../api/types';
 import { startOfLocalDay, endOfLocalDay } from '../utils/time';
 
 // ★ 旧 localStore API は存在しないため、低レベルなファイルI/Oを直接利用
@@ -145,7 +145,7 @@ export type CreateEventInput = {
   
 
   // UI向けプロパティ
-  color?: string;
+  color?: HexColor;
   tags?: string[];
   visibility?: Event['visibility'];
   priority?: Event['priority'];
@@ -166,6 +166,7 @@ function eventToSingleInstance(ev: Event): EventInstance {
     dtstart: ev.dtstart,
     dtend: ev.dtend,
     tags: ev.tags ?? [],
+    color: ev.color,
     visibility: ev.visibility,
     occurrence_key: `${ev.event_id}@@${ev.dtstart}`, // ユニーク判定用
   } as any;
@@ -206,6 +207,7 @@ export async function createEventLocal(input: CreateEventInput): Promise<EventIn
     dtend: input.dtend,
     tz: 'local',
     tags: input.tags ?? [],
+    color: input.color,
     visibility: (input.visibility as any) ?? 'private',
     priority: input.priority ?? 'Normal',
     

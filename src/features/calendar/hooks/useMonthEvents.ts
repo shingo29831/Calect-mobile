@@ -11,6 +11,7 @@ type SortMode = 'span' | 'start';
 export type EventSegment = EventInstance & {
   spanLeft: boolean;   // 前日にまたがっているなら左を角丸にしない
   spanRight: boolean;  // 翌日にまたがっているなら右を角丸にしない
+  color?: string;
 };
 
 /** 「同一」とみなすための簡易キー（暫定） */
@@ -59,6 +60,7 @@ function layoutIntoLanes(rows: EventInstance[], maxBars = MAX_BARS_PER_DAY): Eve
 
     placed.push({
       ...ev,
+      color: ev.color,
       spanLeft: false,
       spanRight: false,
       __lane: lane,

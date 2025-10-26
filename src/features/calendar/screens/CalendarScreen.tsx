@@ -12,14 +12,16 @@ import dayjs from '../../../lib/dayjs';
 import { listInstancesByDate, getAllTags, createEventLocalAndShard } from '../../../store/db';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../../navigation';
+import LinearGradient from 'react-native-linear-gradient';
 
-// ★ 月シャードAPI（新パス固定）
+
+//  月シャードAPI（新パス固定）
 import {
   ensureMonths as ensureMonthsLoaded,
   loadMonth as ensureMonthLoaded,
 } from '../../../data/persistence/monthShard';
 
-// ★ ローカル全初期化（snapshot / ops / months / queue 等）
+//  ローカル全初期化（snapshot / ops / months / queue 等）
 import { resetLocalData } from '../../../data/persistence/localStore';
 
 import {
@@ -63,7 +65,7 @@ function useTodayTick(fmt: string = 'YYYY-MM-DD') {
     const schedule = () => {
       const now = dayjs();
       const next = now.add(1, 'day').startOf('day');
-      const ms = Math.max(1000, next.diff(now, 'millisecond')); // 安全に最小1秒
+      const ms = Math.max(1000, next.diff(now, 'millisecond'));
       timer = setTimeout(() => {
         setTodayStr(dayjs().format(fmt));
         schedule();
@@ -272,7 +274,7 @@ const MinuteDial: React.FC<MinuteDialProps> = memo(({
 
   const handleRelease = useCallback((evt: any) => {
     const { locationX, locationY } = evt.nativeEvent;
-    const m = pickFromXY(locationX, locationY); // ← locationY を正しく渡す
+    const m = pickFromXY(locationX, locationY);
     onConfirm(m);
   }, [pickFromXY, onConfirm]);
 
@@ -341,6 +343,170 @@ const MinuteDial: React.FC<MinuteDialProps> = memo(({
   );
 });
 
+const useMeasure = () => {
+  const ref = useRef<View>(null);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  const onLayout = useCallback((e: any) => {
+    const { width, height } = e.nativeEvent.layout;
+    setSize({ w: width, h: height });
+  }, []);
+  return { ref, size, onLayout };
+};
+
+/** Hue 連続バー */
+const HueBar = ({
+  hue,
+  onChange,
+  theme,
+  onDragStateChange,
+}: {
+  hue: number;
+  onChange: (h: number) => void;
+  theme: ReturnType<typeof useAppTheme>;
+  onDragStateChange?: (dragging: boolean) => void;
+}) => {
+  const { ref, size, onLayout } = useMeasure();
+  const handle = useCallback(
+    (x: number) => {
+      const w = Math.max(1, size.w);
+      const ratio = clamp01(x / w);
+      onChange(ratio * 360);
+    },
+    [size.w, onChange]
+  );
+
+  return (
+    <View style={{ height: 22, borderRadius: 6, overflow: 'hidden', borderWidth: HAIR_SAFE, borderColor: theme.border }}>
+      <View ref={ref as any} onLayout={onLayout} style={{ height: 22 }}>
+        <LinearGradient
+          colors={[0, 60, 120, 180, 240, 300, 360].map((h) => hsvToHex(h, 1, 1))}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={StyleSheet.absoluteFill}
+        />
+        <View
+          style={StyleSheet.absoluteFill}
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onResponderGrant={(e) => {
+            onDragStateChange?.(true);
+            handle(e.nativeEvent.locationX);
+          }}
+          onResponderMove={(e) => handle(e.nativeEvent.locationX)}
+          onResponderRelease={() => onDragStateChange?.(false)}
+          onResponderTerminate={() => onDragStateChange?.(false)}
+        />
+        {/* 現在位置マーカー */}
+        <View
+          style={{
+            position: 'absolute',
+            left: clamp01(hue / 360) * Math.max(1, size.w) - 7,
+            top: 11 - 7,
+            width: 14,
+            height: 14,
+            borderRadius: 7,
+            borderWidth: 2,
+            borderColor: theme.surface,
+            backgroundColor: hsvToHex(hue, 1, 1),
+            shadowColor: '#000',
+            shadowOpacity: 0.25,
+            shadowRadius: 4,
+            shadowOffset: { width: 0, height: 1 },
+          }}
+        />
+      </View>
+    </View>
+  );
+};
+
+
+/** SV 連続ピッカー（ピクセル単位） */
+const SVPicker = ({
+  hue,
+  s,
+  v,
+  onChange,
+  theme,
+  onDragStateChange,
+}: {
+  hue: number;
+  s: number;
+  v: number;
+  onChange: (s: number, v: number) => void;
+  theme: ReturnType<typeof useAppTheme>;
+  onDragStateChange?: (dragging: boolean) => void;
+}) => {
+  const { ref, size, onLayout } = useMeasure();
+
+  const handle = useCallback(
+    (x: number, y: number) => {
+      const w = Math.max(1, size.w);
+      const h = Math.max(1, size.h);
+      const ss = clamp01(x / w);
+      const vv = clamp01(1 - y / h); // 上=明るい(1), 下=暗い(0)
+      onChange(ss, vv);
+    },
+    [size.w, size.h, onChange]
+  );
+
+  const markerX = clamp01(s) * Math.max(1, size.w);
+  const markerY = (1 - clamp01(v)) * Math.max(1, size.h);
+
+  return (
+    <View
+      ref={ref as any}
+      onLayout={onLayout}
+      style={{
+        aspectRatio: 1,
+        borderRadius: 12,
+        overflow: 'hidden',
+        borderWidth: HAIR_SAFE,
+        borderColor: theme.border,
+      }}
+    >
+      {/* ベース：Hue フル彩度・フル明度 */}
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: hsvToHex(hue, 1, 1) }]} />
+      {/* 左→右：白→透明（彩度） */}
+      <LinearGradient colors={['#FFFFFF', '#FFFFFF00']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+      {/* 上→下：透明→黒（明度） */}
+      <LinearGradient colors={['#00000000', '#000000FF']} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={StyleSheet.absoluteFill} />
+      {/* タッチレイヤ */}
+      <View
+        style={StyleSheet.absoluteFill}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={(e) => {
+          onDragStateChange?.(true);
+          handle(e.nativeEvent.locationX, e.nativeEvent.locationY);
+        }}
+        onResponderMove={(e) => handle(e.nativeEvent.locationX, e.nativeEvent.locationY)}
+        onResponderRelease={() => onDragStateChange?.(false)}
+        onResponderTerminate={() => onDragStateChange?.(false)}
+      />
+      {/* マーカー */}
+      <View
+        style={{
+          position: 'absolute',
+          left: markerX - 9,
+          top: markerY - 9,
+          width: 18,
+          height: 18,
+          borderRadius: 9,
+          borderWidth: 2,
+          borderColor: '#fff',
+          backgroundColor: hsvToHex(hue, s, v),
+          shadowColor: '#000',
+          shadowOpacity: 0.25,
+          shadowRadius: 4,
+          shadowOffset: { width: 0, height: 1 },
+        }}
+      />
+    </View>
+  );
+};
+
+
+
 // ===== フォールバック定数 =====
 const ORGS_FALLBACK: EntityItem[] = [
   { id: 'org_me',   label: 'My Schedule', emoji: '🗓️', kind: 'me' },
@@ -352,10 +518,10 @@ const GROUPS_BY_ORG_FALLBACK: Record<string, EntityItem[]> = {
   org_me:  [ { id: 'grp_me_private', label: 'Private', emoji: '🔒', kind: 'group' } ],
   org_fam: [
     { id: 'grp_fam_all',     label: 'All Members', emoji: '👨‍👩‍👧‍👦', kind: 'group' },
-    { id: 'grp_fam_parents', label: 'Parents',     emoji: '🧑‍🦰', kind: 'group' },
+    { id: 'grp_fam_parents', label: 'Parents',     emoji: '🧑‍🦰',      kind: 'group' },
   ],
   org_team: [
-    { id: 'grp_team_all', label: 'All Hands', emoji: '🙌', kind: 'group' },
+    { id: 'grp_team_all', label: 'All Hands',  emoji: '🙌', kind: 'group' },
     { id: 'grp_team_dev', label: 'Developers', emoji: '💻', kind: 'group' },
     { id: 'grp_team_des', label: 'Designers',  emoji: '🎨', kind: 'group' },
   ],
@@ -365,6 +531,62 @@ const FOLLOWS_FALLBACK: EntityItem[] = [
   { id: 'u1', label: 'Alice', emoji: '👩', kind: 'user' },
   { id: 'u2', label: 'Bob',   emoji: '👨', kind: 'user' },
   { id: 'u3', label: 'Chris', emoji: '🧑', kind: 'user' },
+];
+
+// ===== 追加：HSV → HEX ユーティリティ & パレット =====
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+function hsvToHex(h: number, s: number, v: number): string {
+  h = ((h % 360) + 360) % 360;
+  s = clamp01(s);
+  v = clamp01(v);
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  let r = 0, g = 0, b = 0;
+  if (0 <= h && h < 60) { r = c; g = x; b = 0; }
+  else if (60 <= h && h < 120) { r = x; g = c; b = 0; }
+  else if (120 <= h && h < 180) { r = 0; g = c; b = x; }
+  else if (180 <= h && h < 240) { r = 0; g = x; b = c; }
+  else if (240 <= h && h < 300) { r = x; g = 0; b = c; }
+  else { r = c; g = 0; b = x; }
+  const R = Math.round((r + m) * 255);
+  const G = Math.round((g + m) * 255);
+  const B = Math.round((b + m) * 255);
+  const toHex = (n: number) => n.toString(16).padStart(2, '0');
+  return `#${toHex(R)}${toHex(G)}${toHex(B)}`;
+}
+
+function hexToHsv(hex: string): { h: number; s: number; v: number } {
+  const m = hex.trim().match(/^#?([0-9a-f]{6})/i);
+  if (!m) return { h: 0, s: 0, v: 0 };
+  const int = parseInt(m[1], 16);
+  const r = ((int >> 16) & 255) / 255;
+  const g = ((int >> 8) & 255) / 255;
+  const b = (int & 255) / 255;
+
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const d = max - min;
+  let h = 0;
+  if (d !== 0) {
+    switch (max) {
+      case r: h = ((g - b) / d) % 6; break;
+      case g: h = (b - r) / d + 2; break;
+      default: h = (r - g) / d + 4;
+    }
+    h *= 60; if (h < 0) h += 360;
+  }
+  const s = max === 0 ? 0 : d / max;
+  const v = max;
+  return { h, s, v };
+}
+
+
+// よく使う色のチップ
+const COLOR_PALETTE: string[] = [
+  '#2563EB', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4',
+  '#3B82F6', '#22C55E', '#EAB308', '#F97316', '#EC4899', '#14B8A6',
+  '#0EA5E9', '#84CC16', '#E11D48', '#A855F7', '#F43F5E', '#38BDF8',
+  '#34D399', '#C084FC', '#111827', '#6B7280', '#D1D5DB', '#FFFFFF'
 ];
 
 // ステータスバッジ
@@ -386,7 +608,7 @@ function StatusBadge({ text }: { text: string }) {
 export default function CalendarScreen({ navigation }: Props) {
   const theme = useAppTheme();
 
-  // ★ 今日（YYYY-MM-DD）を 0:00 で更新
+  //  今日（YYYY-MM-DD）を 0:00 で更新
   const todayStr = useTodayTick('YYYY-MM-DD');
 
   // ===== スキーマ・プロフィール読み込み =====
@@ -453,7 +675,7 @@ export default function CalendarScreen({ navigation }: Props) {
   // ===== 画面状態 =====
   const [selected, setSelected] = useState<string>(todayStr);
   const [currentMonth, setCurrentMonth] = useState<string>(dayjs().format('YYYY-MM'));
-  const monthLabel = useMemo(() => dayjs(currentMonth + '-01').format('YYYY年M月'), [currentMonth]); // ← ヘッダー表示用
+  const monthLabel = useMemo(() => dayjs(currentMonth + '-01').format('YYYY年M月'), [currentMonth]);
   const [sortMode, setSortMode] = useState<SortMode>('span');
 
   const [selectedEntityId, setSelectedEntityId] = useState<string>('org_me');
@@ -590,6 +812,17 @@ export default function CalendarScreen({ navigation }: Props) {
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
 
+  //  カラーパレット用状態
+  const [colorOpen, setColorOpen] = useState(false);
+  const [tempColor, setTempColor] = useState<string>('#2563EB'); // 決定前の一時色
+  const [hue, setHue] = useState<number>(210); // 初期はブルー寄り
+  // 彩度・明度（S, V）
+  const [svS, setSvS] = useState<number>(1);
+  const [svV, setSvV] = useState<number>(1);
+
+  const HUE_STEPS = 12;            // 12色バー
+  const SV_STEPS = 12;             // 12x12 グリッド
+
   const [allTags, setAllTags] = useState<string[]>([]);
   useEffect(() => { setAllTags(getAllTags()); }, [addVisible]);
 
@@ -629,6 +862,12 @@ export default function CalendarScreen({ navigation }: Props) {
   const [formCalId, setFormCalId] = useState<string>(DEFAULT_CAL_ID);
 
   const [refreshKey, setRefreshKey] = useState(0);
+
+
+  // カラーピッカー内でドラッグ中はスクロールを止める
+  const [draggingColor, setDraggingColor] = useState(false);
+
+
   const initialCurrent = useRef(dayjs().startOf('month').format('YYYY-MM-DD')).current;
 
   const calRef = useRef<any>(null);
@@ -667,11 +906,11 @@ export default function CalendarScreen({ navigation }: Props) {
     ensureEndTimeNotBeforeStart(startTime, endTime);
   }, [startTime, endTime, ensureEndTimeNotBeforeStart]);
 
-  // グリッド高さ計算（★ 月タイトルを消したので差し引かない）
+  // グリッド高さ計算
   const pageHeight = useMemo(() => {
     if (gridH <= 0) return 0;
     const weekH = Math.max(weekHeaderH, 24);
-    const usable = Math.max(0, gridH - weekH); // ← MONTH_TITLE_HEIGHT を引かない
+    const usable = Math.max(0, gridH - weekH);
     const cell = Math.max(1, Math.floor(usable / ROWS));
     return cell * ROWS;
   }, [gridH, weekHeaderH]);
@@ -722,15 +961,10 @@ export default function CalendarScreen({ navigation }: Props) {
     });
   }, [getVisibleGroupIds, selectedEntity]);
 
-  // ======== ★★★ ここを変更：当月だけ → 前月・当月・来月の「日配列」を生成して描画対象にする ★★★ ========
+  // ======== 3ヶ月分の描画対象日 ========
   const deferredMonth = useDeferredValue(currentMonth);
-
-  // 旧: 当月の42日分だけ
-  // const monthDates = useMemo(() => getMonthRangeDates(deferredMonth), [deferredMonth]);
-
-  // 新: 前月1日〜来月末までの全日（約 28〜31 x 3 = 84〜93日）を作る
   const threeMonthsDates = useMemo(() => {
-    const { startISO, endISO } = getPrevCurrNextRange(deferredMonth); // ISOの上下限を取得
+    const { startISO, endISO } = getPrevCurrNextRange(deferredMonth);
     const start = dayjs(startISO).startOf('day');
     const end   = dayjs(endISO).startOf('day');
     const out: string[] = [];
@@ -740,11 +974,10 @@ export default function CalendarScreen({ navigation }: Props) {
     return out;
   }, [deferredMonth]);
 
-  // useMonthEvents に渡す“描画対象日リスト”を3か月分に拡張
   const enabledMonthDates = dbReady ? threeMonthsDates : [];
   const { eventsByDate, overflowByDate } = useMonthEvents(enabledMonthDates, filterEventsByEntity, sortMode, refreshKey);
 
-  // ====== 初回同期（= 月データの事前ロード） ======
+  // ====== 初回同期 ======
   useEffect(() => {
     if (hasSyncedRef.current) return;
 
@@ -784,20 +1017,16 @@ export default function CalendarScreen({ navigation }: Props) {
     return () => clearTimeout(t);
   }, [syncTimedOut]);
 
-  // ====== ローカルデータのリセット（resetLocalData 使用） ======
+  // ====== ローカルデータのリセット ======
   const visitedMonthsRef = useRef<Set<string>>(new Set());
   const runResetLocal = useCallback(async () => {
     try {
       setSyncing(true);
-
-      // 1) 端末内データ削除（snapshot / months / ops / queue など）
       await resetLocalData();
-
-      // 2) メモリ内のキャッシュ・状態をクリア（存在しない場合は無視）
       try {
         const ms = await import('../../../data/persistence/monthShard');
         (ms as any).clearMonthCache?.();
-      } catch {} 
+      } catch {}
       try {
         const db = await import('../../../store/db');
         db.replaceAllInstances?.([]);
@@ -805,11 +1034,9 @@ export default function CalendarScreen({ navigation }: Props) {
       visitedMonthsRef.current.clear();
       setSheetVisible(false);
 
-      // 3) 画面側状態のリフレッシュ
       setDbReady(false);
       setRefreshKey((v) => v + 1);
 
-      // 4) 直近±1か月を再ロード（空状態で即復帰）
       const center = dayjs(currentMonth + '-01');
       const months = [
         center.subtract(1, 'month').format('YYYY-MM'),
@@ -832,30 +1059,22 @@ export default function CalendarScreen({ navigation }: Props) {
 
   // FIRST_DAY=0(日) → Tue=2,  FIRST_DAY=1(月) → Tue=1
   const tueStartCol = useMemo(() => ((2 - FIRST_DAY + 7) % 7), [FIRST_DAY]);
-
-  // オーバレイの左位置と幅（火～木＝3列ぶん）
   const nameOverlayLeft = useMemo(() => tueStartCol * colWBase, [tueStartCol, colWBase]);
   const nameOverlayWidth = useMemo(() => colWBase * 3, [colWBase]);
 
-  // ▼ オーバレイの縦位置：カレンダーグリッドの最下段 DayCell の中央
   const nameOverlayTop = useMemo(() => {
     if (pageHeight <= 0 || cellH <= 0) return 0;
-    // カレンダー本体は weekHeaderH の直下に始まる
     const gridTop = weekHeaderH;
-    // 最下段(ROWS-1)のセルの上端 + セル高さの1/2 = セル中央
     const centerY = gridTop + (ROWS - 1) * cellH + Math.floor(cellH / 2);
-    // ピルの見た目高さ（約36px）を想定して半分引いて中央合わせ（必要に応じて微調整）
     return Math.max(weekHeaderH, centerY - 18);
   }, [weekHeaderH, pageHeight, cellH]);
 
-
-  // ▼ 最下段（6行目= ROWS-1）の“日付の上”あたりに置く
   const bottomRowTop = useMemo(
-    () => weekHeaderH + (cellH * (ROWS - 1)) + 4, // +4 でセル内に少し入れる
+    () => weekHeaderH + (cellH * (ROWS - 1)) + 4,
     [weekHeaderH, cellH]
   );
 
-  // ===== ヘッダー設定（★ タイトルは「月」、カレンダー名は表示しない） =====
+  // ===== ヘッダー設定 =====
   useEffect(() => {
     const headerLeft = () => (
       <Pressable onPress={left.openDrawer} hitSlop={12} style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
@@ -881,7 +1100,6 @@ export default function CalendarScreen({ navigation }: Props) {
     (navigation as any).setOptions({
       headerStyle: { backgroundColor: theme.appBg },
       headerTitleAlign: 'left',
-      // ★ 月を表示（例：2025年10月）
       headerTitle: () => (
         <Text style={{ fontSize: 18, fontWeight: '800', color: theme.textPrimary }}>
           {monthLabel}
@@ -935,7 +1153,7 @@ export default function CalendarScreen({ navigation }: Props) {
         dayContainer: { flex: 0, padding: 0, margin: 0, alignItems: 'stretch', justifyContent: 'flex-start', width: undefined, backgroundColor: 'transparent' },
       },
       'stylesheet.day.basic': { base: { flex: 0, width: undefined, margin: 0, padding: 0, alignItems: 'stretch', justifyContent: 'flex-start', backgroundColor: 'transparent' } },
-        'stylesheet.calendar-list.main': { calendar: { paddingLeft: 0, paddingRight: 0, paddingTop: 0, marginTop: 0, backgroundColor: 'transparent' } },
+      'stylesheet.calendar-list.main': { calendar: { paddingLeft: 0, paddingRight: 0, paddingTop: 0, marginTop: 0, backgroundColor: 'transparent' } },
       'stylesheet.calendar.header': { header: { marginBottom: 0, paddingVertical: 0, height: 0, backgroundColor: 'transparent' } },
     };
   }, [bgImageUri, theme.appBg]);
@@ -964,7 +1182,7 @@ export default function CalendarScreen({ navigation }: Props) {
             colWLast={colWLast}
             cellH={cellH}
             dayEvents={dbSegs}
-            hideRightDivider={true}
+            hideRightDivider
             moreCount={moreDb}
           />
         </View>
@@ -973,7 +1191,7 @@ export default function CalendarScreen({ navigation }: Props) {
     [colWBase, colWLast, cellH, eventsByDate, overflowByDate, dbReady, todayStr, theme.mode]
   );
 
-  // 先読み（前後 -2,-1,+1,+2 ヶ月）
+  // 先読み
   useEffect(() => {
     if (!dbReady) return;
     const run = async () => {
@@ -1051,7 +1269,7 @@ export default function CalendarScreen({ navigation }: Props) {
     ensureEndTimeNotBeforeStart(startTime, next);
   }, [endMinute, startTime, ensureEndTimeNotBeforeStart]);
 
-  // ===== 保存ロジック（共通化） =====
+  // ===== 保存ロジック =====
   const saveEvent = useCallback(async () => {
     const saving = (CalendarScreen as any).__saving;
     if (saving) return;
@@ -1087,7 +1305,6 @@ export default function CalendarScreen({ navigation }: Props) {
       const color = (formColor || '').trim();
       const validColor = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(color) ? color : undefined;
 
-      // ★ 月シャードにもライトスルーするAPIに変更
       await createEventLocalAndShard({
         calendar_id: formCalId,
         title: formTitle.trim(),
@@ -1123,6 +1340,7 @@ export default function CalendarScreen({ navigation }: Props) {
     formColor, formCalId, tags, sheetVisible, sheetDate, filterEventsByEntity
   ]);
 
+  // ==== ここから UI ====
   return (
     <View style={[styles.container, { backgroundColor: bgColor }]}>
       {/* 背景画像 & スクリーン */}
@@ -1141,14 +1359,12 @@ export default function CalendarScreen({ navigation }: Props) {
       {/* カレンダー */}
       <View style={[styles.gridBlock, { backgroundColor: 'transparent' }]} onLayout={(e) => setGridH(Math.round(e.nativeEvent.layout.height))}>
         <View style={[styles.gridInner, { backgroundColor: 'transparent' }]} onLayout={(e) => setInnerW(e.nativeEvent.layout.width)}>
-          {/* ▼▼▼ 月タイトルは削除（内部に描画しない） ▼▼▼ */}
-
           {/* 曜日ヘッダ */}
           <View onLayout={(e) => setWeekHeaderH(Math.round(e.nativeEvent.layout.height))}>
             {innerW > 0 ? <WeekHeader colWBase={colWBase} colWLast={colWLast} /> : null}
           </View>
 
-          {/* ★ カレンダー名オーバレイ（最下段 DayCell の中央 / Tue-Thu に跨る） */}
+          {/* カレンダー名オーバレイ */}
           {innerW > 0 && pageHeight > 0 && (
             <View
               pointerEvents="none"
@@ -1181,8 +1397,6 @@ export default function CalendarScreen({ navigation }: Props) {
             </View>
           )}
 
-
-
           {/* CalendarList */}
           <View style={{ overflow: 'hidden', backgroundColor: 'transparent' }}>
             {(pageHeight > 0 && innerW > 0) && (
@@ -1212,7 +1426,7 @@ export default function CalendarScreen({ navigation }: Props) {
                 theme={calendarTheme as any}
                 contentContainerStyle={{ alignItems: 'flex-start', paddingHorizontal: 0, paddingTop: 0 }}
                 dayComponent={renderDay as any}
-                extraData={todayStr}  // ★ これが再描画トリガー
+                extraData={todayStr}
               />
             )}
           </View>
@@ -1255,7 +1469,7 @@ export default function CalendarScreen({ navigation }: Props) {
         rowHeight={64}
       />
 
-      {/* 右下の FAB（シートを開くだけ） */}
+      {/* 右下の FAB */}
       <Pressable
         onPress={() => {
           setFormTitle('');
@@ -1319,13 +1533,10 @@ export default function CalendarScreen({ navigation }: Props) {
                   paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6, borderBottomWidth: HAIR_SAFE, borderColor: theme.border,
                 }}
               >
-
-                {/* タイトル（中央寄せ） */}
                 <Text style={{ fontSize: 16, fontWeight: '800', color: theme.textPrimary }}>
                   イベントを追加
                 </Text>
 
-                {/* 右上：決定（保存） */}
                 <Pressable
                   onPress={saveEvent}
                   style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: theme.accent, minWidth: 96, alignItems: 'center' }}
@@ -1345,7 +1556,7 @@ export default function CalendarScreen({ navigation }: Props) {
                 </View>
               </Pressable>
 
-              {/* フォーム本体（下部に固定ボタンがあるため余白を追加） */}
+              {/* フォーム本体 */}
               <View style={{ flex: 1, minHeight: 0 }}>
                 <ScrollView
                   keyboardShouldPersistTaps="handled"
@@ -1354,6 +1565,7 @@ export default function CalendarScreen({ navigation }: Props) {
                   scrollEventThrottle={16}
                   contentContainerStyle={{ padding: 16, paddingTop: 0, paddingBottom: 110 }}
                   style={{ flex: 1 }}
+                  scrollEnabled={!draggingColor}
                 >
                   {/* タイトル */}
                   <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>タイトル(必須)</Text>
@@ -1389,9 +1601,7 @@ export default function CalendarScreen({ navigation }: Props) {
                   {/* 日付 */}
                   <View style={{ marginBottom: 12 }}>
                     <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>日付</Text>
-
                     <View style={{ flexDirection: 'row', gap: 12 }}>
-                      {/* 開始日 */}
                       <Pressable
                         onPress={() => { setStartCalOpen(true); setEndCalOpen(false); }}
                         style={{
@@ -1405,7 +1615,6 @@ export default function CalendarScreen({ navigation }: Props) {
                         </Text>
                       </Pressable>
 
-                      {/* 終了日 */}
                       <Pressable
                         onPress={() => { setEndCalOpen(true); setStartCalOpen(false); }}
                         style={{
@@ -1428,7 +1637,6 @@ export default function CalendarScreen({ navigation }: Props) {
                   </View>
                   {!formAllDay && (
                     <View style={{ flexDirection: 'row', gap: 12 }}>
-                      {/* 開始時刻 */}
                       <Pressable
                         onPress={() => {
                           setStartTimeOpen(true);
@@ -1449,7 +1657,6 @@ export default function CalendarScreen({ navigation }: Props) {
                         <Text style={{ fontSize: 16, color: theme.textPrimary, fontWeight: '700' }}>{startTime}</Text>
                       </Pressable>
 
-                      {/* 終了時刻 */}
                       <Pressable
                         onPress={() => {
                           setEndTimeOpen(true);
@@ -1537,10 +1744,10 @@ export default function CalendarScreen({ navigation }: Props) {
                     </Pressable>
                   </View>
 
-                  {/* 色 */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12, marginTop: 12 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>色 (#HEX)</Text>
+                  {/* 色 (#HEX) + プレビュー + パレットを開く */}
+                  <View style={{ gap: 8, marginBottom: 12, marginTop: 12 }}>
+                    <Text style={{ fontSize: 12, color: theme.textSecondary }}>色 (#HEX)</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                       <TextInput
                         value={formColor}
                         onChangeText={setFormColor}
@@ -1549,12 +1756,47 @@ export default function CalendarScreen({ navigation }: Props) {
                         placeholderTextColor={theme.textSecondary}
                         selectionColor={theme.accent}
                         style={{
+                          flex: 1,
                           borderWidth: HAIR_SAFE, borderColor: theme.border, borderRadius: 10,
                           paddingHorizontal: 12, paddingVertical: 10, fontSize: 16,
                           color: theme.textPrimary, backgroundColor: theme.appBg,
                         }}
                       />
+                      {/* 現在色プレビュー */}
+                      <View
+                        style={{
+                          width: 36, height: 36, borderRadius: 8,
+                          backgroundColor: /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test((formColor || '').trim()) ? formColor : 'transparent',
+                          borderWidth: HAIR_SAFE, borderColor: theme.border
+                        }}
+                      />
+                      <Pressable
+                        onPress={() => {
+                          const base = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test((formColor || '').trim())
+                            ? formColor : '#2563EB';
+                          setTempColor(base || '#2563EB');
+
+                          //  HSVへ同期
+                          const { h, s, v } = hexToHsv(base || '#2563EB');
+                          setHue(h);
+                          setSvS(s);
+                          setSvV(v);
+                          
+                          setColorOpen(true);
+                        }}
+                        style={{
+                          paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10,
+                          backgroundColor: theme.surface, borderWidth: HAIR_SAFE, borderColor: theme.border
+                        }}
+                      >
+                        <Text style={{ color: theme.textPrimary, fontWeight: '800' }}>パレットを開く</Text>
+                      </Pressable>
                     </View>
+                    {!!formColor && !/^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test((formColor || '').trim()) && (
+                      <Text style={{ marginTop: 2, fontSize: 12, color: theme.accent }}>
+                        色コードは #RRGGBB または #RRGGBBAA で入力してください
+                      </Text>
+                    )}
                   </View>
                 </ScrollView>
               </View>
@@ -1582,12 +1824,9 @@ export default function CalendarScreen({ navigation }: Props) {
       {/* ====== MiniCalendar Overlay ====== */}
       {addVisible && (startCalOpen || endCalOpen) && (
         <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 20000 }}>
-          {/* 背景タップで閉じる */}
           <Pressable onPress={() => { setStartCalOpen(false); setEndCalOpen(false); }} style={StyleSheet.absoluteFillObject}>
             <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }} />
           </Pressable>
-
-          {/* 画面上部寄せ */}
           <View
             style={{
               position: 'absolute',
@@ -1778,6 +2017,184 @@ export default function CalendarScreen({ navigation }: Props) {
           </View>
         </View>
       )}
+
+      {/* ====== Color Palette Overlay ====== */}
+      {addVisible && colorOpen && (
+        <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 20012 }}>
+          {/* 背景タップで閉じる（反映しない） */}
+          <Pressable onPress={() => setColorOpen(false)} style={StyleSheet.absoluteFillObject}>
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }} />
+          </Pressable>
+
+          {/* 本体カード（高さ制限：中身スクロール、下部フッターは固定） */}
+          <View
+            style={{
+              position: 'absolute',
+              top: Math.floor(SCREEN_H * 0.10),
+              alignSelf: 'center',
+              width: Math.min(460, SCREEN_W - 16),
+              maxHeight: Math.floor(SCREEN_H * 0.80),
+              borderRadius: 16,
+              backgroundColor: theme.surface,
+              borderWidth: HAIR_SAFE,
+              borderColor: theme.border,
+              shadowColor: '#000',
+              shadowOpacity: 0.25,
+              shadowRadius: 14,
+              shadowOffset: { width: 0, height: 8 },
+              overflow: 'hidden',
+            }}
+          >
+            {/* ---------- 上：スクロール領域 ---------- */}
+            <View style={{ flex: 1 }}>
+              <ScrollView
+                contentContainerStyle={{ padding: 16, paddingBottom: 16 }}
+                keyboardShouldPersistTaps="handled"
+                scrollEnabled={!draggingColor}
+              >
+                <Text style={{ fontSize: 16, fontWeight: '800', color: theme.textPrimary, marginBottom: 10 }}>
+                  カラーを選択
+                </Text>
+
+                {/* プレビュー（左：現在 / 右：選択中） */}
+                <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+                  <View style={{ flex: 1, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>現在</Text>
+                    <View style={{
+                      width: 56, height: 56, borderRadius: 12,
+                      backgroundColor: /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test((formColor || '').trim()) ? formColor : 'transparent',
+                      borderWidth: HAIR_SAFE, borderColor: theme.border
+                    }} />
+                  </View>
+                  <View style={{ flex: 1, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>選択中</Text>
+                    <View style={{
+                      width: 56, height: 56, borderRadius: 12,
+                      backgroundColor: tempColor,
+                      borderWidth: HAIR_SAFE, borderColor: theme.border
+                    }} />
+                  </View>
+                </View>
+
+                {/* よく使う色（チップ） */}
+                <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 8 }}>共通カラー</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingBottom: 4 }}
+                  style={{ marginBottom: 12 }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    {COLOR_PALETTE.map((hex) => {
+                      const selected = tempColor.toLowerCase() === hex.toLowerCase();
+                      return (
+                        <Pressable
+                          key={hex}
+                          onPress={() => {
+                            setTempColor(hex);
+                            const { h, s, v } = hexToHsv(hex);
+                            setHue(h);
+                            setSvS(s);
+                            setSvV(v);
+                          }}
+                          style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: 16,
+                            backgroundColor: hex,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderWidth: selected ? 2 : HAIR_SAFE,
+                            borderColor: selected ? theme.accent : theme.border,
+                            marginRight: 2,
+                          }}
+                          accessibilityLabel={`色 ${hex}`}
+                        >
+                          {selected && <Text style={{ color: '#fff', fontSize: 14, fontWeight: '900' }}>✓</Text>}
+                        </Pressable>
+                      );
+                    })}
+                    {/* クリア（白） */}
+                    <Pressable
+                      onPress={() => {
+                        setTempColor('#FFFFFF');
+                        const { h, s, v } = hexToHsv('#FFFFFF');
+                        setHue(h);
+                        setSvS(s);
+                        setSvV(v);
+                      }}
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 16,
+                        backgroundColor: '#FFFFFF',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderWidth: HAIR_SAFE,
+                        borderColor: theme.border,
+                      }}
+                      accessibilityLabel="白"
+                    >
+                      <Text style={{ color: '#000', fontSize: 12 }}>□</Text>
+                    </Pressable>
+                  </View>
+                </ScrollView>
+                {/* ===== Hue バー（連続グラデ） ===== */}
+                <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>色相（Hue）</Text>
+                <HueBar
+                  hue={hue}
+                  onChange={(h) => {
+                    setHue(h);
+                    setTempColor(hsvToHex(h, svS, svV));
+                  }}
+                  theme={theme}
+                  onDragStateChange={setDraggingColor}
+                />
+
+                <SVPicker
+                  hue={hue}
+                  s={svS}
+                  v={svV}
+                  onChange={(s, v) => {
+                    setSvS(s);
+                    setSvV(v);
+                    setTempColor(hsvToHex(hue, s, v));
+                  }}
+                  theme={theme}
+                  onDragStateChange={setDraggingColor}
+                />
+              </ScrollView>
+            </View>
+
+            {/* ---------- 下：フッター（固定） ---------- */}
+            <View style={{ padding: 14, borderTopWidth: HAIR_SAFE, borderColor: theme.border, backgroundColor: theme.surface }}>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <Pressable
+                  onPress={() => setColorOpen(false)}
+                  style={{ width: 108, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+                    borderWidth: HAIR_SAFE, borderColor: theme.border, backgroundColor: theme.surface }}
+                >
+                  <Text style={{ color: theme.textPrimary, fontWeight: '800' }}>キャンセル</Text>
+                </Pressable>
+                {/* <Pressable
+                  onPress={() => { setFormColor(''); setColorOpen(false); }}
+                  style={{ width: 108, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+                    borderWidth: HAIR_SAFE, borderColor: theme.border, backgroundColor: theme.appBg }}
+                >
+                  <Text style={{ color: theme.textPrimary, fontWeight: '800' }}>クリア</Text>
+                </Pressable> */}
+                <Pressable
+                  onPress={() => { setFormColor(tempColor); setColorOpen(false); }}
+                  style={{ flex: 1, width: 108, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.accent }}
+                >
+                  <Text style={{ color: theme.accentText, fontWeight: '800' }}>決定</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </View>
+      )}
+
     </View>
   );
 }
@@ -1803,8 +2220,6 @@ const overlayStyles = StyleSheet.create({
     elevation: 4,
     textAlign: 'center',
   },
-
-  // 新：最下段の火水木「日付の上」に載せる用
   namePillTop: {
     paddingHorizontal: 12,
     paddingVertical: 6,

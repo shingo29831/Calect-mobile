@@ -233,6 +233,7 @@ export type Event = {
   dtend: ISODate;               // series end
   tz: string | 'local';
   tags?: string[];
+  color?: HexColor;
   visibility: EventVisibility;
   priority: PriorityLevel;
 };
@@ -251,6 +252,7 @@ export type EventInstance = {
   dtend: ISODate;               // series end
   tz: string | 'local';
   tags?: string[];
+  color?: HexColor;
   visibility: EventVisibility;
   priority: PriorityLevel;
   occurrence_key?: string;       // `${event_id}@@${start_at}`
