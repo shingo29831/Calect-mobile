@@ -15,7 +15,7 @@ export type EventSegment = EventInstance & {
 
 /** 「同一」とみなすための簡易キー（暫定） */
 const keyOf = (ev: EventInstance) =>
-  `${String(ev.calendar_id ?? '')}|${String(ev.title ?? '')}|${String(ev.start_at ?? '')}|${String(ev.end_at ?? '')}`;
+  `${String(ev.calendar_id ?? '')}|${String(ev.title ?? '')}|${String(ev.dtstart ?? '')}|${String(ev.end_at ?? '')}`;
 
 /** 並び順を作る（開始時刻 or 所要時間の長い順） */
 function makeSorter(sortMode: SortMode) {

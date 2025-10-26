@@ -108,9 +108,9 @@ function indexBy<T extends Record<string, any>>(rows: T[], key: keyof T) {
   return m;
 }
 
-/** 置換用：event_id + start_at から occurrence_key を再計算 */
-function computeOccurrenceKey(it: Pick<EventInstance, "event_id" | "start_at">) {
-  return `${it.event_id}@@${it.start_at}`;
+/** 置換用：event_id + dtstart から occurrence_key を再計算 */
+function computeOccurrenceKey(it: Pick<EventInstance, "event_id" | "dtstart">) {
+  return `${it.event_id}@@${it.dtstart}`;
 }
 
 /* =============================== マージ処理本体 =============================== */
@@ -152,8 +152,8 @@ function applyDiffToLocal(local: LocalStore, diff: ServerDiffResponse): ApplyRes
       if (!(i as any).deleted_at) {
         const next = { ...(i as EventInstance) };
         // occurrence_key が無ければ補完
-        if (!next.occurrence_key && next.event_id && next.start_at) {
-          next.occurrence_key = computeOccurrenceKey({ event_id: next.event_id, start_at: next.start_at });
+        if (!next.occurrence_key && next.event_id && next.dtstart) {
+          next.occurrence_key = computeOccurrenceKey({ event_id: next.event_id, dtstart: next.dtstart });
         }
         instMap.set(i.instance_id, next);
       } else {
@@ -181,8 +181,8 @@ function applyDiffToLocal(local: LocalStore, diff: ServerDiffResponse): ApplyRes
         if (real) {
           (inst as any).cid_ulid = null;           // 一時IDはクリア（任意）
           (inst as any).event_id = real;           // 正規IDへ置換
-          if ((inst as any).start_at) {
-            (inst as any).occurrence_key = computeOccurrenceKey({ event_id: real, start_at: (inst as any).start_at });
+          if ((inst as any).dtstart) {
+            (inst as any).occurrence_key = computeOccurrenceKey({ event_id: real, dtstart: (inst as any).dtstart });
           }
           changed = true;
         }

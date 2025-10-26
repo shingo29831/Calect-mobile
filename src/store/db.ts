@@ -121,8 +121,8 @@ export function listInstancesByDate(dateISO: string): EventInstance[] {
   const end   = dayjs(endOfLocalDay(dateISO)).valueOf();
 
   const out = instances.filter((it) => {
-    const a = dayjs(it.start_at).valueOf();
-    const b = dayjs(it.end_at).valueOf();
+    const a = dayjs(it.dtstart).valueOf();
+    const b = dayjs(it.dtend).valueOf();
     return !(b < start || a > end);
   });
 
@@ -130,7 +130,7 @@ export function listInstancesByDate(dateISO: string): EventInstance[] {
   return out;
 }
 
-// ====== CreateEventInput（必要最小限）======
+// ====== CreateEventInput======
 export type CreateEventInput = {
   calendar_id?: string;      // 既定: 'CAL_LOCAL_DEFAULT'
   title: string;
@@ -163,7 +163,7 @@ function eventToSingleInstance(ev: Event): EventInstance {
     summary: ev.summary ?? null,
     start_at: ev.start_at,
     end_at: ev.end_at,
-    dtstarat: ev.dtstart,
+    dtstart: ev.dtstart,
     dtend: ev.dtend,
     tags: ev.tags ?? [],
     visibility: ev.visibility,

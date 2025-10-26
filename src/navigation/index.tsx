@@ -1,7 +1,7 @@
 ﻿import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import CalendarScreen from '../features/calendar/screens/CalendarScreen';
-import EventModal from '../features/calendar/components/EventModal';
+// import EventModal from '../features/calendar/components/EventModal';
 
 
 export type RootStackParamList = {
@@ -18,7 +18,7 @@ export default function RootNavigator(){
 return (
 <Stack.Navigator>
     <Stack.Screen name="Calendar" component={CalendarScreen} options={{ title: 'Calect' }} />
-    <Stack.Screen name="EventModal" component={EventModal} options={{ presentation: 'modal', title: 'Create Event' }} />
+    {/* <Stack.Screen name="EventModal" component={EventModal} options={{ presentation: 'modal', title: 'Create Event' }} /> */}
 </Stack.Navigator>
 );
 }
