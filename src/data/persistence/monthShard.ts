@@ -244,3 +244,26 @@ export async function replaceEventIdInMonthsByRange(
   }
   return { months, changed };
 }
+
+/* ======================= キャッシュ温め（前月・当月・来月） ======================= */
+
+/** YYYY-MM を基準に、前後 span ヶ月ぶんの配列を返す（デフォルト: 前月・当月・来月） */
+export function monthNeighbors(baseYYYYMM: string, span = 1): string[] {
+  const base = dayjs(`${baseYYYYMM}-01`);
+  const out: string[] = [];
+  for (let d = -span; d <= span; d++) {
+    out.push(base.add(d, 'month').format('YYYY-MM'));
+  }
+  return out;
+}
+
+/** ISO日時を基準に、前月・当月・来月の3ヶ月をキャッシュへロード */
+export async function ensurePrevCurrNextByISO(centerIso?: string) {
+  const ym = dayjs(centerIso ?? dayjs().toISOString()).format('YYYY-MM');
+  await ensureMonths(monthNeighbors(ym, 1));
+}
+
+/** YYYY-MM を基準に、前月・当月・来月の3ヶ月をキャッシュへロード */
+export async function ensurePrevCurrNextByYYYYMM(yyyyMM: string) {
+  await ensureMonths(monthNeighbors(yyyyMM, 1));
+}

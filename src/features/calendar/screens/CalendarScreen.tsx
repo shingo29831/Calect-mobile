@@ -35,6 +35,8 @@ import {
   ROWS,
   FIRST_DAY as FIRST_DAY_FALLBACK,
   PROFILE_ICON_SIZE,
+  // ▼ 追記：前月・当月・来月のISOレンジ
+  getPrevCurrNextRange,
 } from '../components/CalendarParts';
 
 import LeftDrawer from '../components/LeftDrawer';
@@ -705,10 +707,26 @@ export default function CalendarScreen({ navigation }: Props) {
     });
   }, [getVisibleGroupIds, selectedEntity]);
 
-  // 月のイベント
+  // ======== ★★★ ここを変更：当月だけ → 前月・当月・来月の「日配列」を生成して描画対象にする ★★★ ========
   const deferredMonth = useDeferredValue(currentMonth);
-  const monthDates = useMemo(() => getMonthRangeDates(deferredMonth), [deferredMonth]);
-  const enabledMonthDates = dbReady ? monthDates : [];
+
+  // 旧: 当月の42日分だけ
+  // const monthDates = useMemo(() => getMonthRangeDates(deferredMonth), [deferredMonth]);
+
+  // 新: 前月1日〜来月末までの全日（約 28〜31 x 3 = 84〜93日）を作る
+  const threeMonthsDates = useMemo(() => {
+    const { startISO, endISO } = getPrevCurrNextRange(deferredMonth); // ISOの上下限を取得
+    const start = dayjs(startISO).startOf('day');
+    const end   = dayjs(endISO).startOf('day');
+    const out: string[] = [];
+    for (let cur = start; cur.isBefore(end) || cur.isSame(end, 'day'); cur = cur.add(1, 'day')) {
+      out.push(cur.format('YYYY-MM-DD'));
+    }
+    return out;
+  }, [deferredMonth]);
+
+  // useMonthEvents に渡す“描画対象日リスト”を3か月分に拡張
+  const enabledMonthDates = dbReady ? threeMonthsDates : [];
   const { eventsByDate, overflowByDate } = useMonthEvents(enabledMonthDates, filterEventsByEntity, sortMode, refreshKey);
 
   // ====== 初回同期（= 月データの事前ロード） ======

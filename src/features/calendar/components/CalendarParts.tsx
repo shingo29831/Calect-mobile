@@ -82,6 +82,7 @@ export function startOfWeek(d: dayjs.Dayjs, firstDay: number) {
   const diff = (wd - firstDay + 7) % 7;
   return d.subtract(diff, 'day');
 }
+
 export function getMonthRangeDates(yyyymm: string) {
   const m0 = (dayjs as any).tz ? dayjs.tz(`${yyyymm}-01`, DISPLAY_TZ) : dayjs(`${yyyymm}-01`);
   const start = startOfWeek(m0.startOf('month'), FIRST_DAY);
@@ -90,6 +91,24 @@ export function getMonthRangeDates(yyyymm: string) {
     days.push(start.add(i, 'day').format('YYYY-MM-DD'));
   }
   return days;
+}
+
+/* === 追記: 前月・当月・来月の3か月レンジ（ISO）を返すユーティリティ === */
+/**
+ * 可視月（YYYY-MM）を基準に、前月1日 00:00:00Z 〜 来月末 23:59:59Z を返す。
+ * 引数未指定なら「今月」を基準にする。
+ */
+export function getPrevCurrNextRange(baseYYYYMM?: string) {
+  const base =
+    baseYYYYMM
+      ? ((dayjs as any).tz ? dayjs.tz(`${baseYYYYMM}-01`, DISPLAY_TZ) : dayjs(`${baseYYYYMM}-01`))
+      : ((dayjs as any).tz ? dayjs.tz(dayjs().format('YYYY-MM-01'), DISPLAY_TZ) : dayjs().startOf('month'));
+
+  const start = base.subtract(1, 'month').startOf('month');
+  const end   = base.add(1, 'month').endOf('month');
+
+  const fmt = (d: dayjs.Dayjs) => d.format('YYYY-MM-DD[T]HH:mm:ss[Z]');
+  return { startISO: fmt(start), endISO: fmt(end) };
 }
 
 /* ===== UI: 週ヘッダ ===== */
@@ -117,12 +136,9 @@ export function WeekHeader({ colWBase, colWLast }: { colWBase: number; colWLast:
               height: HEADER_HEIGHT,
               alignItems: 'center',
               justifyContent: 'center',
-            //   borderRightWidth: isLast ? 0 : 0,//LINE_W,
-            //   borderBottomWidth: 1,
-            //   borderColor: theme.lineColor,
             }}
           >
-            <Text style={{ fontSize: HEADER_FONT, fontWeight: '700', color ,}}>{label}</Text>
+            <Text style={{ fontSize: HEADER_FONT, fontWeight: '700', color }}>{label}</Text>
           </View>
         );
       })}
