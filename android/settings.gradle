@@ -1,6 +1,31 @@
-pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
-plugins { id("com.facebook.react.settings") }
-extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
-rootProject.name = 'calect'
-include ':app'
-includeBuild('../node_modules/@react-native/gradle-plugin')
+pluginManagement {
+  includeBuild("../node_modules/@react-native/gradle-plugin")
+}
+plugins {
+  id("com.facebook.react.settings")
+}
+extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
+  ex.autolinkLibrariesFromCommand()
+}
+
+rootProject.name = "calect"
+
+include(":app")
+
+// ★ AAR ライブラリモジュール（SecureStore）を含める
+include(":securestore")
+project(":securestore").projectDir = new File(rootDir, "securestore")
+
+// 依存解決のレポジトリ（必要最低限）
+dependencyResolutionManagement {
+  repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
+  repositories {
+    mavenCentral()
+    google()
+    // React Native のローカル Maven
+    maven { url("$rootDir/../node_modules/react-native/android") }
+  }
+}
+
+// RN Gradle Plugin をビルドに取り込む
+includeBuild("../node_modules/@react-native/gradle-plugin")

@@ -1,2 +1,2 @@
-import AppRoot from './src/AppRoot';
+import AppRoot from './src/app/AppRoot';
 export default AppRoot;
