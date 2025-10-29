@@ -616,7 +616,7 @@ function extractAlpha01(hex: string) {
   return parseInt(aa, 16) / 255;
 }
 
-/** === Alpha 連続バー === */
+/** === 追記：Alpha 連続バー === */
 const AlphaBar = ({
   width = 260,
   height = 18,
@@ -685,7 +685,7 @@ const AlphaBar = ({
         />
       </View>
       <Text style={{ marginTop: 6, fontSize: 11, color: theme.textSecondary }}>
-        透明度: {Math.round(value * 100)}%
+        透明度（Alpha）: {Math.round(value * 100)}%
       </Text>
     </View>
   );
@@ -2254,7 +2254,7 @@ export default function CalendarScreen({ navigation }: Props) {
 
                 {/* Hue / SV / Alpha */}
                 <View style={{ alignSelf: 'center', width: 350, gap: 10 }}>
-                  <Text style={{ fontSize: 11, color: theme.textSecondary }}>色相（Hue）</Text>
+                  <Text style={{ fontSize: 11, color: theme.textSecondary }}>色相</Text>
                   <HueBar
                     hue={hue}
                     onChange={(h) => {
