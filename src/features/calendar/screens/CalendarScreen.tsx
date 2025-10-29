@@ -298,7 +298,7 @@ const MinuteDial: React.FC<MinuteDialProps> = memo(({
       <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} pointerEvents="none">
         {items.map((m) => {
           const angle = ((m / 60) * 360 - 90) * (Math.PI / 180);
-          const r = radius * ringRatio;
+          const r = radius * 0.78;
           const x = radius + r * Math.cos(angle);
           const y = radius + r * Math.sin(angle);
           const showLabel = m % 5 === 0;
@@ -354,7 +354,6 @@ const useMeasure = () => {
 };
 
 /** Hue 連続バー */
-// 置換対象: 「HueBar」コンポーネント全体
 const HueBar = ({
   hue,
   onChange,
@@ -376,7 +375,6 @@ const HueBar = ({
     [size.w, onChange]
   );
 
-  // ★ 高さを 22 → 16 に、マーカーも小さく
   const BAR_H = 16;
   const MARK = 12;
 
@@ -401,7 +399,7 @@ const HueBar = ({
           onResponderRelease={() => onDragStateChange?.(false)}
           onResponderTerminate={() => onDragStateChange?.(false)}
         />
-        {/* 現在位置マーカー（14→12） */}
+        {/* 現在位置マーカー */}
         <View
           style={{
             position: 'absolute',
@@ -458,7 +456,6 @@ const SVPicker = ({
   const markerX = clamp01(s) * Math.max(1, size.w);
   const markerY = (1 - clamp01(v)) * Math.max(1, size.h);
 
-  // ★ 角丸を 12 → 10、マーカーを 18 → 14
   const R = 10;
   const MARK = 14;
 
@@ -491,7 +488,7 @@ const SVPicker = ({
         onResponderTerminate={() => onDragStateChange?.(false)}
       />
 
-      {/* マーカー（18→14） */}
+      {/* マーカー */}
       <View
         style={{
           position: 'absolute',
@@ -587,6 +584,112 @@ function hexToHsv(hex: string): { h: number; s: number; v: number } {
   const v = max;
   return { h, s, v };
 }
+
+/* === 追記：HEX<->RGBA ヘルパー群 === */
+const HEX6 = /^#([0-9a-f]{6})$/i;
+const HEX8 = /^#([0-9a-f]{8})$/i;
+
+function hexToRgb(hex: string) {
+  const m6 = HEX6.exec(hex);
+  const m8 = HEX8.exec(hex);
+  const raw = (m8 ? m8[1].slice(0, 6) : m6 ? m6[1] : null);
+  if (!raw) return { r: 0, g: 0, b: 0 };
+  const r = parseInt(raw.slice(0, 2), 16);
+  const g = parseInt(raw.slice(2, 4), 16);
+  const b = parseInt(raw.slice(4, 6), 16);
+  return { r, g, b };
+}
+function rgbaStringFrom(hex6: string, alpha01: number) {
+  const { r, g, b } = hexToRgb(hex6);
+  return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, alpha01))})`;
+}
+function appendAlpha(hex6: string, alpha01: number) {
+  const a = Math.round(Math.max(0, Math.min(1, alpha01)) * 255)
+    .toString(16)
+    .padStart(2, '0')
+    .toUpperCase();
+  return HEX6.test(hex6) ? `${hex6}${a}` : hex6;
+}
+function extractAlpha01(hex: string) {
+  if (!HEX8.test(hex)) return 1;
+  const aa = hex.slice(-2);
+  return parseInt(aa, 16) / 255;
+}
+
+/** === Alpha 連続バー === */
+const AlphaBar = ({
+  width = 260,
+  height = 18,
+  value,
+  onChange,
+  baseHex, // #RRGGBB
+}: {
+  width?: number;
+  height?: number;
+  value: number;                   // 0..1
+  onChange: (a01: number) => void;
+  baseHex: string;                 // 不透明の基準色 (#RRGGBB)
+}) => {
+  const { onLayout, size, ref } = useMeasure();
+  const theme = useAppTheme();
+  const w = size.w || width;
+  const knobX = Math.round(Math.max(0, Math.min(1, value)) * (w - 20));
+
+  const start = rgbaStringFrom(baseHex, 0);
+  const end   = rgbaStringFrom(baseHex, 1);
+
+  const pan = React.useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (e) => {
+        const x = e.nativeEvent.locationX;
+        const a = Math.max(0, Math.min(1, x / Math.max(1, w)));
+        onChange(a);
+      },
+      onPanResponderMove: (e) => {
+        const x = e.nativeEvent.locationX;
+        const a = Math.max(0, Math.min(1, x / Math.max(1, w)));
+        onChange(a);
+      },
+      onPanResponderRelease: () => {},
+    })
+  ).current;
+
+  return (
+    <View style={{ width, alignItems: 'center' }}>
+      <View
+        ref={ref}
+        onLayout={onLayout}
+        {...pan.panHandlers}
+        style={{
+          width, height, borderRadius: 10, overflow: 'hidden',
+          borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border,
+        }}
+      >
+        <LinearGradient
+          colors={[start, end]}
+          style={{ width: '100%', height: '100%' }}
+          start={{ x: 0, y: 0.5 }}
+          end={{ x: 1, y: 0.5 }}
+        />
+        {/* ノブ */}
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute', left: knobX, top: -4, width: 20, height: height + 8,
+            borderRadius: 10, borderWidth: 2, borderColor: theme.surface,
+            backgroundColor: rgbaStringFrom(baseHex, value),
+            shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
+          }}
+        />
+      </View>
+      <Text style={{ marginTop: 6, fontSize: 11, color: theme.textSecondary }}>
+        透明度: {Math.round(value * 100)}%
+      </Text>
+    </View>
+  );
+};
 
 
 // よく使う色のチップ
@@ -822,7 +925,8 @@ export default function CalendarScreen({ navigation }: Props) {
 
   //  カラーパレット用状態
   const [colorOpen, setColorOpen] = useState(false);
-  const [tempColor, setTempColor] = useState<string>('#2563EB'); // 決定前の一時色
+  const [tempColor, setTempColor] = useState<string>('#2563EB'); // 決定前の一時色（#RRGGBB）
+  const [tempAlpha, setTempAlpha] = useState<number>(1);         // 追記：透明度(0..1)
   const [hue, setHue] = useState<number>(210); // 初期はブルー寄り
   // 彩度・明度（S, V）
   const [svS, setSvS] = useState<number>(1);
@@ -1756,26 +1860,37 @@ export default function CalendarScreen({ navigation }: Props) {
                   <View style={{ gap: 8, marginBottom: 12, marginTop: 12 }}>
                     <Text style={{ fontSize: 12, color: theme.textSecondary }}>色</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                      {/* 現在色プレビュー */}
+                      {/* 現在色プレビュー（#RRGGBB/#RRGGBBAA対応） */}
                       <View
                         style={{
                           width: 36, height: 36, borderRadius: 8,
-                          backgroundColor: /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test((formColor || '').trim()) ? formColor : '#2563EB',
+                          backgroundColor: (() => {
+                            const cur = (formColor || '').trim();
+                            if (HEX8.test(cur)) return rgbaStringFrom(`#${cur.replace('#','').slice(0,6)}`, extractAlpha01(cur));
+                            if (HEX6.test(cur)) return cur;
+                            return '#2563EB';
+                          })(),
                           borderWidth: HAIR_SAFE, borderColor: theme.border
                         }}
                       />
                       <Pressable
                         onPress={() => {
-                          const base = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test((formColor || '').trim())
-                            ? formColor : '#2563EB';
-                          setTempColor(base || '#2563EB');
+                          // 既存色から base(#RRGGBB) と alpha(0..1) を抽出
+                          const cur = (formColor || '').trim();
+                          const base = HEX8.test(cur) ? `#${cur.replace('#','').slice(0,6)}`
+                            : HEX6.test(cur) ? cur
+                            : '#2563EB';
+                          const a = HEX8.test(cur) ? extractAlpha01(cur) : 1;
 
-                          //  HSVへ同期
+                          setTempColor(base || '#2563EB');
+                          setTempAlpha(a);
+
+                          // HSVへ同期
                           const { h, s, v } = hexToHsv(base || '#2563EB');
                           setHue(h);
                           setSvS(s);
                           setSvV(v);
-                          
+
                           setColorOpen(true);
                         }}
                         style={{
@@ -2046,9 +2161,6 @@ export default function CalendarScreen({ navigation }: Props) {
                 keyboardShouldPersistTaps="handled"
                 scrollEnabled={!draggingColor}
               >
-                <Text style={{ fontSize: 15, fontWeight: '800', color: theme.textPrimary, marginBottom: 10 }}>
-                  カラーを選択
-                </Text>
 
                 {/* プレビュー（左右） */}
                 <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center', marginBottom: 12 }}>
@@ -2056,7 +2168,12 @@ export default function CalendarScreen({ navigation }: Props) {
                     <Text style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 6 }}>現在</Text>
                     <View style={{
                       width: 52, height: 52, borderRadius: 12,
-                      backgroundColor: /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test((formColor || '').trim()) ? formColor : 'transparent',
+                      backgroundColor: (() => {
+                        const cur = (formColor || '').trim();
+                        if (HEX8.test(cur)) return rgbaStringFrom(`#${cur.replace('#','').slice(0,6)}`, extractAlpha01(cur));
+                        if (HEX6.test(cur)) return cur;
+                        return 'transparent';
+                      })(),
                       borderWidth: HAIR_SAFE, borderColor: theme.border
                     }} />
                   </View>
@@ -2064,7 +2181,7 @@ export default function CalendarScreen({ navigation }: Props) {
                     <Text style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 6 }}>選択中</Text>
                     <View style={{
                       width: 52, height: 52, borderRadius: 12,
-                      backgroundColor: tempColor,
+                      backgroundColor: rgbaStringFrom(tempColor, tempAlpha),
                       borderWidth: HAIR_SAFE, borderColor: theme.border
                     }} />
                   </View>
@@ -2081,7 +2198,6 @@ export default function CalendarScreen({ navigation }: Props) {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     {COLOR_PALETTE.map((hex) => {
                       const selected = tempColor.toLowerCase() === hex.toLowerCase();
-                      // ★ チップ 32→24
                       const CHIP = 24;
                       return (
                         <Pressable
@@ -2136,7 +2252,7 @@ export default function CalendarScreen({ navigation }: Props) {
                   </View>
                 </ScrollView>
 
-                {/* Hue / SV を中央寄せ・最大幅 280 に制限 */}
+                {/* Hue / SV / Alpha */}
                 <View style={{ alignSelf: 'center', width: 350, gap: 10 }}>
                   <Text style={{ fontSize: 11, color: theme.textSecondary }}>色相（Hue）</Text>
                   <HueBar
@@ -2161,6 +2277,15 @@ export default function CalendarScreen({ navigation }: Props) {
                     theme={theme}
                     onDragStateChange={setDraggingColor}
                   />
+
+                  {/* 追記：透明度バー */}
+                  <Text style={{ fontSize: 11, color: theme.textSecondary }}>透明度</Text>
+                  <AlphaBar
+                    width={350}
+                    value={tempAlpha}
+                    onChange={setTempAlpha}
+                    baseHex={tempColor}
+                  />
                 </View>
               </ScrollView>
             </View>
@@ -2168,7 +2293,7 @@ export default function CalendarScreen({ navigation }: Props) {
             {/* 下：フッター（固定） */}
             <View style={{ padding: 12, borderTopWidth: HAIR_SAFE, borderColor: theme.border, backgroundColor: theme.surface }}>
               <View style={{ flexDirection: 'row', gap: 10 }}>
-                {/* キャンセル：4割 */}
+                {/* キャンセル */}
                 <Pressable
                   onPress={() => setColorOpen(false)}
                   style={{
@@ -2185,9 +2310,13 @@ export default function CalendarScreen({ navigation }: Props) {
                   <Text style={{ color: theme.textPrimary, fontWeight: '800' }}>キャンセル</Text>
                 </Pressable>
 
-                {/* 決定：6割 */}
+                {/* 決定（#RRGGBBAAで格納） */}
                 <Pressable
-                  onPress={() => { setFormColor(tempColor); setColorOpen(false); }}
+                  onPress={() => {
+                    const finalHex = appendAlpha(tempColor, tempAlpha); // #RRGGBBAA
+                    setFormColor(finalHex);
+                    setColorOpen(false);
+                  }}
                   style={{
                     flex: 6,
                     height: 42,
