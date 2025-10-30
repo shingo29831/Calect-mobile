@@ -1236,7 +1236,17 @@ export default function CalendarScreen({ navigation }: Props) {
     setSheetVisible(false);
   }, []);
 
-  const handleDayPress = useCallback((d: DateData) => { setSelected(d.dateString); openSheet(d.dateString); }, [openSheet]);
+  const handleDayPress = useCallback((d: DateData) => {
+    const ds = d.dateString;
+    console.log('before pressed:', ds, 'selected(before):', selected, 'isSel:', ds === selected);
+    if (selected !== ds) {
+      setSelected(ds);
+      return;
+    }
+    openSheet(ds);
+    console.log('after pressed:', ds, 'selected(before):', selected, 'isSel:', ds === selected);
+  }, [selected, openSheet]);
+
 
   const onEndReached = useCallback(() => {
     setSheetItems((prev) => {
