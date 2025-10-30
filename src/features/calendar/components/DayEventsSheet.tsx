@@ -1,5 +1,5 @@
 ﻿// src/features/calendar/components/DayEventsSheet.tsx
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   FlatList,
@@ -50,7 +50,7 @@ export default function DayEventsSheet({
 }: Props) {
   const theme = useAppTheme();
 
-  // 折りたたみ <-> 全開 を1本の Animated.Value で管理
+  // 折りたたみ <-> 全開
   const expandedH = height;
   const collapsedH = Math.max(200, height * SNAP_RATIO_COLLAPSED);
   const sheetHeight = useRef(new Animated.Value(collapsedH)).current;
@@ -58,8 +58,11 @@ export default function DayEventsSheet({
   // バックドロップのフェード
   const overlayOpacity = useRef(new Animated.Value(0)).current;
 
-  // つまみ（ドラッグハンドル）の色はテーマから
+  // つまみ（ドラッグハンドル）の色
   const handleColor = useMemo(() => theme.border, [theme.border]);
+
+  // 「編集」ボタン表示中の行インデックス（未選択は -1）
+  const [activeIndex, setActiveIndex] = useState(-1);
 
   // visible の変化に応じてフェード/高さを調整
   useEffect(() => {
@@ -69,10 +72,16 @@ export default function DayEventsSheet({
       useNativeDriver: true,
     }).start();
     if (!visible) {
-      // 非表示にする時は高さを畳んだ状態へ戻す
+      // 非表示にする時は高さを畳んだ状態へ戻す & 編集ボタンも閉じる
       sheetHeight.setValue(collapsedH);
+      setActiveIndex(-1);
     }
   }, [visible, overlayOpacity, collapsedH, sheetHeight]);
+
+  // データが変わったら編集ボタンを閉じる
+  useEffect(() => {
+    setActiveIndex(-1);
+  }, [date, items?.length]);
 
   // 開閉アニメーション
   const expand = () => {
@@ -93,19 +102,10 @@ export default function DayEventsSheet({
   };
 
   // ドラッグ操作
-  const dragY = useRef(0);
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gesture) => {
-        // 縦方向に一定以上動いたらパン開始
-        return Math.abs(gesture.dy) > 4;
-      },
-      onPanResponderGrant: () => {
-        dragY.current = 0;
-      },
+      onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 4,
       onPanResponderMove: (_, gesture) => {
-        dragY.current = gesture.dy;
-        // 現在の高さからドラッグ量を反映し、範囲内にクランプ
         const next = Math.min(
           expandedH,
           Math.max(collapsedH, (sheetHeight as any).__getValue() - gesture.dy)
@@ -114,22 +114,16 @@ export default function DayEventsSheet({
       },
       onPanResponderRelease: (_, gesture) => {
         const { dy, vy } = gesture;
-        // 一定距離 or 速度で下方向なら閉じる
         if (dy > DRAG_CLOSE_THRESHOLD_PX || vy > DRAG_CLOSE_VELOCITY) {
           onClose();
           return;
         }
-        // 途中位置の場合は中間値で開く/閉じるを決める
         const halfway = (expandedH + collapsedH) / 2;
         const current = (sheetHeight as any).__getValue();
-        if (current >= halfway || dy < 0) {
-          expand();
-        } else {
-          collapse();
-        }
+        if (current >= halfway || dy < 0) expand();
+        else collapse();
       },
       onPanResponderTerminate: () => {
-        // ジェスチャ中断時も中間値でスナップ
         const halfway = (expandedH + collapsedH) / 2;
         const current = (sheetHeight as any).__getValue();
         if (current >= halfway) expand();
@@ -163,10 +157,9 @@ export default function DayEventsSheet({
           {
             backgroundColor: theme.surface,
             borderTopColor: theme.border,
-            height: sheetHeight, // 折りたたみ/全開をこの値で切り替え
+            height: sheetHeight,
           },
         ]}
-        // 内側の Pressable と競合させない
         onStartShouldSetResponder={() => false}
       >
         {/* つまみ領域（ドラッグで開閉 / タップで展開） */}
@@ -190,30 +183,51 @@ export default function DayEventsSheet({
         <FlatList
           data={items}
           keyExtractor={(_, i) => String(i)}
-          renderItem={({ item }) => (
-            <View style={[styles.row, { height: rowHeight, borderBottomColor: theme.border }]}>
-              {/* NOTE: 必要になったら専用の <EventListItem /> へ差し替え */}
-              <Text style={{ color: theme.textPrimary, fontSize: 14, fontWeight: '600' }}>
-                {item?.title ?? 'Untitled'}
-              </Text>
-              {item?.summary ? (
-                <Text style={{ color: theme.textSecondary, fontSize: 12 }} numberOfLines={1}>
-                  {item.summary}
-                </Text>
-              ) : null}
+          renderItem={({ item, index }) => {
+            const isActive = index === activeIndex;
+            return (
               <Pressable
-                onPress={() => onPressEdit?.(item)}
-                hitSlop={10}
-                style={{
-                  paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
-                  borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border, backgroundColor: theme.appBg,
-                }}
-                accessibilityLabel="このイベントを編集"
+                onPress={() => setActiveIndex(isActive ? -1 : index)}
+                style={[
+                  styles.row,
+                  {
+                    height: rowHeight,
+                    borderBottomColor: theme.border,
+                  },
+                ]}
               >
-                <Text style={{ color: theme.textPrimary, fontWeight: '800' }}>編集</Text>
+                {/* 左：タイトル/サマリー（縦積み） */}
+                <View style={styles.rowLeft}>
+                  <Text style={{ color: theme.textPrimary, fontSize: 14, fontWeight: '600' }}>
+                    {item?.title ?? 'Untitled'}
+                  </Text>
+                  {item?.summary ? (
+                    <Text style={{ color: theme.textSecondary, fontSize: 12 }} numberOfLines={1}>
+                      {item.summary}
+                    </Text>
+                  ) : null}
+                </View>
+
+                {/* 右：編集ボタン（行タップでだけ表示） */}
+                {isActive && (
+                  <Pressable
+                    onPress={() => onPressEdit?.(item)}
+                    hitSlop={10}
+                    style={[
+                      styles.editBtn,
+                      {
+                        borderColor: theme.border,
+                        backgroundColor: theme.appBg,
+                      },
+                    ]}
+                    accessibilityLabel="このイベントを編集"
+                  >
+                    <Text style={{ color: theme.textPrimary, fontWeight: '800' }}>編集</Text>
+                  </Pressable>
+                )}
               </Pressable>
-            </View>
-          )}
+            );
+          }}
           onEndReached={onEndReached}
           onEndReachedThreshold={0.5}
           keyboardShouldPersistTaps="handled"
@@ -222,6 +236,7 @@ export default function DayEventsSheet({
               ? [styles.empty, { backgroundColor: 'transparent' }]
               : { backgroundColor: 'transparent' }
           }
+          onScrollBeginDrag={() => setActiveIndex(-1)}
         />
       </Animated.View>
     </View>
@@ -263,9 +278,22 @@ const styles = StyleSheet.create({
   count: { fontSize: 12, opacity: 0.8 },
   row: {
     paddingHorizontal: 16,
-    justifyContent: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 12,
+  },
+  rowLeft: {
+    flex: 1,
     gap: 2,
+    justifyContent: 'center',
+  },
+  editBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignSelf: 'center',
   },
   empty: {
     minHeight: 120,
