@@ -19,7 +19,6 @@ import { EventVisibility } from 'src/api/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'EventModal'>;
 
-
 const HAIR = StyleSheet.hairlineWidth;
 const { width: WINDOW_W, height: WINDOW_H } = Dimensions.get('window');
 const SHEET_MAX_H = Math.min(Math.floor(WINDOW_H * 0.9), 1000);
@@ -563,6 +562,15 @@ export default function EventModal({ route, navigation }: Props) {
   useEffect(() => { ensureEndDateNotBeforeStart(startDate, endDate); }, [startDate, endDate, ensureEndDateNotBeforeStart]);
   useEffect(() => { ensureEndTimeNotBeforeStart(startTime, endTime); }, [startTime, endTime, ensureEndTimeNotBeforeStart]);
 
+  const navigateBackWithRefresh = useCallback((sDate: string, eDate: string) => {
+    // カレンダー画面に「再計算用の印」を渡してから戻る
+    (navigation as any).navigate('Calendar', {
+      __refreshAt: Date.now(),
+      __refreshHint: { start: sDate, end: eDate },
+    });
+    navigation.goBack();
+  }, [navigation]);
+
   const handleSave = useCallback(async () => {
     try {
       if (!formTitle.trim()) {
@@ -619,8 +627,11 @@ export default function EventModal({ route, navigation }: Props) {
 
       await upsertEvent(payload as any);
 
-      // ★ 変更反映を確実にするためのソフトリフレッシュ
+      // ★ 変更反映を確実にするためのソフトリフレッシュ（キャッシュ破棄 + DB購読通知）
       await softRefreshAfterChange(sDate, eDate);
+
+      // ★ カレンダーへ再描画フラグを渡してから戻る（起動直後/保存後にイベントバーが出ない対策）
+      navigateBackWithRefresh(sDate, eDate);
 
       Alert.alert(isEdit ? '更新しました' : '保存しました', isEdit ? 'イベントを更新しました。' : 'イベントを作成しました。');
       navigation.goBack();
@@ -628,7 +639,7 @@ export default function EventModal({ route, navigation }: Props) {
       console.warn('[EventModal] save failed:', e);
       Alert.alert(isEdit ? '更新に失敗しました' : '保存に失敗しました', String(e?.message ?? e ?? 'unknown error'));
     }
-  }, [isEdit, p?.event_id, formTitle, formSummary, formAllDay, startDate, endDate, startTime, endTime, formColor, tags, formCalId, formTz, formVisibility, navigation, parseHM]);
+  }, [isEdit, p?.event_id, formTitle, formSummary, formAllDay, startDate, endDate, startTime, endTime, formColor, tags, formCalId, formTz, formVisibility, parseHM, navigateBackWithRefresh]);
 
   const handleDelete = useCallback(() => {
     if (!isEdit || !p?.event_id) return;
@@ -645,8 +656,8 @@ export default function EventModal({ route, navigation }: Props) {
             try {
               await deleteEventService(p.event_id);
               await softRefreshAfterChange(startDate, endDate);
+              navigateBackWithRefresh(startDate, endDate);
               Alert.alert('削除しました', 'イベントを削除しました。');
-              navigation.goBack();
             } catch (e: any) {
               console.warn('[EventModal] delete failed:', e);
               Alert.alert('削除に失敗しました', String(e?.message ?? e ?? 'unknown error'));
@@ -656,7 +667,7 @@ export default function EventModal({ route, navigation }: Props) {
       ],
       { cancelable: true }
     );
-  }, [isEdit, p?.event_id, navigation, startDate, endDate]);
+  }, [isEdit, p?.event_id, startDate, endDate, navigateBackWithRefresh]);
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
@@ -1109,22 +1120,22 @@ export default function EventModal({ route, navigation }: Props) {
               onChange={(m) => { if (startMinuteOpen) setStartMinute(m); else setEndMinute(m); }}
               onConfirm={(m) => {
                 if (startMinuteOpen) {
-                  setStartMinute(m);
-                  const mm = String(m).padStart(2, '0');
-                  const hh = String(startHour ?? 0).padStart(2, '0');
-                  const next = `${hh}:${mm}`;
-                  setStartTime(next);
-                  setStartMinuteOpen(false);
-                  ensureEndTimeNotBeforeStart(next, endTime);
-                } else {
-                  setEndMinute(m);
-                  const mm = String(m).padStart(2, '0');
-                  const hh = String(endHour ?? 0).padStart(2, '0');
-                  const next = `${hh}:${mm}`;
-                  setEndTime(next);
-                  setEndMinuteOpen(false);
-                  ensureEndTimeNotBeforeStart(startTime, next);
-                }
+                    setStartMinute(m);
+                    const mm = String(m).padStart(2, '0');
+                    const hh = String(startHour ?? 0).padStart(2, '0');
+                    const next = `${hh}:${mm}`;
+                    setStartTime(next);
+                    setStartMinuteOpen(false);
+                    ensureEndTimeNotBeforeStart(next, endTime);
+                  } else {
+                    setEndMinute(m);
+                    const mm = String(m).padStart(2, '0');
+                    const hh = String(endHour ?? 0).padStart(2, '0');
+                    const next = `${hh}:${mm}`;
+                    setEndTime(next);
+                    setEndMinuteOpen(false);
+                    ensureEndTimeNotBeforeStart(startTime, next);
+                  }
               }}
               selectedColor={theme.accent}
               textColor={theme.textPrimary}

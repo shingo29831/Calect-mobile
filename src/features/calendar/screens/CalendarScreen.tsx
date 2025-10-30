@@ -11,6 +11,7 @@ import dayjs from '../../../lib/dayjs';
 import { listInstancesByDate } from '../../../store/db';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../../navigation';
+import { useFocusEffect } from '@react-navigation/native';
 
 //  月シャードAPI（新パス固定）
 import {
@@ -314,7 +315,49 @@ export default function CalendarScreen({ navigation }: Props) {
   // ▼ 修正：dbReady 依存を外し、常に3ヶ月分を渡す
   const enabledMonthDates = threeMonthsDates;
 
-  const { eventsByDate, overflowByDate } = useMonthEvents(enabledMonthDates, filterEventsByEntity, sortMode, 0);
+  // ★ 追加：再計算キー（初回描画 & 画面復帰 & 保存直後の反映用）
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  // ★ 追加：emit + 再計算を1か所に集約
+  const forceRecalcAndEmit = useCallback(async () => {
+    setRefreshTick((t) => t + 1);
+    try {
+      const db = await import('../../../store/db');
+      (db as any).emitInstancesChanged?.(); // 実装されていれば購読者へ通知（useMonthEvents が購読している場合に効く）
+    } catch {}
+  }, []);
+
+  const { eventsByDate, overflowByDate } = useMonthEvents(enabledMonthDates, filterEventsByEntity, sortMode, refreshTick);
+
+  // ★ 追加：画面フォーカス時に前後月を再ロードして再計算
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      (async () => {
+        try {
+          const center = dayjs(currentMonth + '-01');
+          const months = [
+            center.subtract(1, 'month').format('YYYY-MM'),
+            center.format('YYYY-MM'),
+            center.add(1, 'month').format('YYYY-MM'),
+          ];
+          await ensureMonthsLoaded(months);
+          if (!alive) return;
+          await forceRecalcAndEmit();
+        } catch {
+          // オフライン等は無視：ローカルキャッシュで描画継続
+          await forceRecalcAndEmit(); // それでも再計算は叩く
+        }
+      })();
+      return () => { alive = false; };
+    }, [currentMonth, forceRecalcAndEmit])
+  );
+
+  // ★ 追加：navigation の focus でも再計算（EventModal→戻る直後の確実反映）
+  useEffect(() => {
+    const unsub = navigation.addListener('focus', () => { forceRecalcAndEmit(); });
+    return unsub;
+  }, [navigation, forceRecalcAndEmit]);
 
   // 初回同期
   useEffect(() => {
@@ -323,13 +366,15 @@ export default function CalendarScreen({ navigation }: Props) {
     let hardTimer: any = null;
     let finished = false;
     setSyncing(true);
-    const finish = (opts: { ok: boolean; timedOut?: boolean }) => {
+    const finish = async (opts: { ok: boolean; timedOut?: boolean }) => {
       if (finished) return;
       finished = true;
       if (syncRunIdRef.current !== thisRunId) return;
       hasSyncedRef.current = true; setDbReady(true); setSyncing(false);
       if (opts.timedOut) setSyncTimedOut(true);
       if (hardTimer) clearTimeout(hardTimer);
+      // ★ 初回ロード直後に再計算（起動直後にイベントバーが出ない対策）
+      await forceRecalcAndEmit();
     };
     (async () => {
       try {
@@ -337,13 +382,24 @@ export default function CalendarScreen({ navigation }: Props) {
         const months = [center.subtract(1,'month').format('YYYY-MM'), center.format('YYYY-MM'), center.add(1,'month').format('YYYY-MM')];
         hardTimer = setTimeout(() => finish({ ok: false, timedOut: true }), 2500);
         await ensureMonthsLoaded(months);
-        finish({ ok: true });
+        await finish({ ok: true });
       } catch {
-        finish({ ok: false });
+        await finish({ ok: false });
       }
     })();
     return () => { if (hardTimer) clearTimeout(hardTimer); };
-  }, [currentMonth]);
+  }, [currentMonth, forceRecalcAndEmit]);
+
+  // ★ 追加：マウント直後の保険（UIレイアウト完了後にも一度叩く）
+  useEffect(() => {
+    const t = setTimeout(() => { forceRecalcAndEmit(); }, 300);
+    return () => clearTimeout(t);
+  }, [forceRecalcAndEmit]);
+
+  // ★ 追加：カレンダー準備完了の瞬間にも叩く（描画サイズ計算後）
+  useEffect(() => {
+    if (calReady) { forceRecalcAndEmit(); }
+  }, [calReady, forceRecalcAndEmit]);
 
   useEffect(() => {
     if (!syncTimedOut) return;
@@ -368,6 +424,8 @@ export default function CalendarScreen({ navigation }: Props) {
       await ensureMonthsLoaded(months);
 
       setDbReady(true);
+      // ★ リセット直後も再計算
+      await forceRecalcAndEmit();
       Alert.alert('リセット完了', 'ローカルデータを初期化しました。');
     } catch (e) {
       console.warn('[runResetLocal] failed:', e);
@@ -376,7 +434,7 @@ export default function CalendarScreen({ navigation }: Props) {
       setSyncing(false);
       setSyncTimedOut(false);
     }
-  }, [currentMonth]);
+  }, [currentMonth, forceRecalcAndEmit]);
 
   // ヘッダー設定
   useEffect(() => {
@@ -532,10 +590,12 @@ export default function CalendarScreen({ navigation }: Props) {
       try {
         await ensureMonthsLoaded(targets);
         targets.forEach((t) => visitedMonthsRef.current.add(t));
+        // ★ 先読み後も一応再計算（新規に可視化される可能性に備える）
+        await forceRecalcAndEmit();
       } catch {}
     };
     run();
-  }, [currentMonth, dbReady]);
+  }, [currentMonth, dbReady, forceRecalcAndEmit]);
 
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
@@ -547,13 +607,16 @@ export default function CalendarScreen({ navigation }: Props) {
         if (!visitedMonthsRef.current.has(m)) {
           ensureMonthLoaded(m)
             .then(() => visitedMonthsRef.current.add(m))
+            .then(() => forceRecalcAndEmit())
             .catch(() => {});
+        } else {
+          forceRecalcAndEmit();
         }
       }
       last = s;
     });
     return () => sub.remove();
-  }, [currentMonth]);
+  }, [currentMonth, forceRecalcAndEmit]);
 
   // 背景色
   const bgColor = bgImageUri ? 'transparent' : theme.appBg;
