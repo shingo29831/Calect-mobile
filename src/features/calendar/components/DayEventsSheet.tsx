@@ -31,6 +31,7 @@ type Props = {
   onClose: () => void;
   onEndReached: () => void;
   rowHeight: number;
+  onPressEdit?: (row: any) => void;
 };
 
 const SNAP_RATIO_COLLAPSED = 0.45; // 折りたたみ時の高さ（画面の45%）
@@ -45,6 +46,7 @@ export default function DayEventsSheet({
   onClose,
   onEndReached,
   rowHeight,
+  onPressEdit,
 }: Props) {
   const theme = useAppTheme();
 
@@ -199,6 +201,17 @@ export default function DayEventsSheet({
                   {item.summary}
                 </Text>
               ) : null}
+              <Pressable
+                onPress={() => onPressEdit?.(item)}
+                hitSlop={10}
+                style={{
+                  paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+                  borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border, backgroundColor: theme.appBg,
+                }}
+                accessibilityLabel="このイベントを編集"
+              >
+                <Text style={{ color: theme.textPrimary, fontWeight: '800' }}>編集</Text>
+              </Pressable>
             </View>
           )}
           onEndReached={onEndReached}
@@ -220,7 +233,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 0, // 画面下からスライドイン
+    bottom: 0,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,

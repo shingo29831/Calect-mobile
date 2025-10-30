@@ -9,7 +9,8 @@ import { CalendarList } from 'react-native-calendars';
 import { Calendar as MiniCalendar } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
 import dayjs from '../../../lib/dayjs';
-import { listInstancesByDate, getAllTags, createEventLocalAndShard } from '../../../store/db';
+import { listInstancesByDate, getAllTags } from '../../../store/db';
+import { upsertEvent, type UpsertEventInput } from '../services/eventUpsert';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../../navigation';
 import LinearGradient from 'react-native-linear-gradient';
@@ -19,10 +20,17 @@ import LinearGradient from 'react-native-linear-gradient';
 import {
   ensureMonths as ensureMonthsLoaded,
   loadMonth as ensureMonthLoaded,
+  // イベントの上書き保存（既存 event_id を upsert）
+  upsertEventV2,
 } from '../../../data/persistence/monthShard';
 
 //  ローカル全初期化（snapshot / ops / months / queue 等）
 import { resetLocalData } from '../../../data/persistence/localStore';
+
+// インスタンス表示の即時反映に使うローカルスナップショット操作
+import { writeFile as _lf_write, readFile as _lf_read } from '../../../store/localFile';
+// UIへリスト反映を飛ばす（store/db 側の購読に通知）
+import { replaceAllInstances } from '../../../store/db';
 
 import {
   EntityItem,
@@ -824,7 +832,7 @@ export default function CalendarScreen({ navigation }: Props) {
   const [sheetItems, setSheetItems] = useState<any[]>([]);
   const sheetY = useRef(new Animated.Value(0)).current;
 
-  // 追加シート（イベント作成）
+  // 追加シート（イベント作成・編集共通UI）
   const [addVisible, setAddVisible] = useState(false);
   const MAX_SHEET_H = Math.floor(SCREEN_H * 0.9);
   const SNAP_HEIGHTS = [
@@ -975,6 +983,9 @@ export default function CalendarScreen({ navigation }: Props) {
 
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // ★ 追加：編集モード状態
+  const [editingItem, setEditingItem] = useState<any | null>(null);
+  const isEditing = !!editingItem;
 
   // カラーピッカー内でドラッグ中はスクロールを止める
   const [draggingColor, setDraggingColor] = useState(false);
@@ -1391,13 +1402,54 @@ export default function CalendarScreen({ navigation }: Props) {
     ensureEndTimeNotBeforeStart(startTime, next);
   }, [endMinute, startTime, ensureEndTimeNotBeforeStart]);
 
-  // ===== 保存ロジック =====
+  // ★ 追加：DayEventsSheet の［編集］押下 → 既存値でフォームをプレフィルして開く
+  const onPressEditFromSheet = useCallback((row: any) => {
+    if (!row) return;
+    setEditingItem(row);
+
+    // 基本情報
+    setFormTitle(row?.title ?? '');
+    setFormSummary(row?.summary ?? '');
+    setFormAllDay(false);
+    setFormColor(row?.color ?? '');
+
+    // 日付・時刻
+    const sDate = String(row?.dtstart ?? sheetDate);
+    const eDate = String(row?.dtend ?? sheetDate);
+    const sAt   = String(row?.start_at ?? '10:00');
+    const eAt   = String(row?.end_at ?? '11:00');
+
+    setStartDate(sDate);
+    setEndDate(eDate);
+    setStartTime(sAt);
+    setEndTime(eAt);
+
+    const sm = /(\d{1,2}):(\d{1,2})/.exec(sAt);
+    const em = /(\d{1,2}):(\d{1,2})/.exec(eAt);
+    setStartHour(sm ? Math.max(0, Math.min(23, parseInt(sm[1], 10))) : 10);
+    setStartMinute(sm ? Math.max(0, Math.min(59, parseInt(sm[2], 10))) : 0);
+    setEndHour(em ? Math.max(0, Math.min(23, parseInt(em[1], 10))) : 11);
+    setEndMinute(em ? Math.max(0, Math.min(59, parseInt(em[2], 10))) : 0);
+
+    // カレンダー
+    setFormCalId(row?.calendar_id ?? DEFAULT_CAL_ID);
+
+    // 開く
+    setAddVisible(true);
+    requestAnimationFrame(() => openAddSheet(1));
+  }, [sheetDate, openAddSheet]);
+
+  // ===== 保存ロジック（新規 / 更新） =====
   const saveEvent = useCallback(async () => {
-    const saving = (CalendarScreen as any).__saving;
-    if (saving) return;
+    if ((CalendarScreen as any).__saving) return;
     (CalendarScreen as any).__saving = true;
+
     try {
-      if (!formTitle.trim()) return;
+      // === 必須チェック ===
+      if (!formTitle.trim()) {
+        Alert.alert('保存できません', 'タイトルを入力してください。');
+        return;
+      }
 
       const norm = (t: string) => {
         const m = String(t || '').match(/^(\d{1,2}):(\d{1,2})$/);
@@ -1409,7 +1461,10 @@ export default function CalendarScreen({ navigation }: Props) {
 
       const st = formAllDay ? '00:00' : norm(startTime);
       const et = formAllDay ? '23:59' : norm(endTime);
-      if (!st || !et) return;
+      if (!st || !et) {
+        Alert.alert('保存できません', '開始/終了時刻の形式が不正です（HH:mm）。');
+        return;
+      }
 
       let sDate = startDate;
       let eDate = endDate;
@@ -1421,46 +1476,69 @@ export default function CalendarScreen({ navigation }: Props) {
 
       const startIso = dayjs(`${sDate} ${st}`).format('YYYY-MM-DD HH:mm');
       const endIso   = dayjs(`${eDate} ${endFixed}`).format('YYYY-MM-DD HH:mm');
-
-      if (!dayjs(endIso).isAfter(dayjs(startIso))) return;
+      if (!dayjs(endIso).isAfter(dayjs(startIso))) {
+        Alert.alert('保存できません', '終了が開始より後になるように設定してください。');
+        return;
+      }
 
       const color = (formColor || '').trim();
       const validColor = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(color) ? color : undefined;
 
-      await createEventLocalAndShard({
+      const eventIdForEdit =
+        editingItem?.event_id ?? editingItem?.cid_ulid ?? editingItem?.eventId ?? undefined;
+
+      // === UpsertEventInput に合わせたペイロード ===
+      const payload: UpsertEventInput = {
+        // 編集時のみ event_id を渡す（新規は undefined でOK）
+        event_id: isEditing ? eventIdForEdit : undefined,
+
         calendar_id: formCalId,
         title: formTitle.trim(),
-        summary: formSummary.trim(),
-
+        summary: (formSummary || '').trim() || undefined,
         rrule: FREQ ?? '',
-        start_at: st,
-        end_at: et,
-        dtstart: sDate,
-        dtend: eDate,
-        tz: formTz ?? 'local',
+
+        start_date: sDate,      // YYYY-MM-DD
+        end_date:   eDate,      // YYYY-MM-DD
+        start_time: st,         // HH:mm
+        end_time:   endFixed,   // HH:mm
+        allDay:    !!formAllDay,
+        tz:         formTz || 'local',
 
         color: validColor,
-        tags: tags.length ?  tags : [] ,
+        tags,
         visibility: formVisibility ?? 'Normal',
-      });
+      };
 
-      if (tags.length) setAllTags(getAllTags());
+      // === ここが肝心：サービス経由で保存 ===
+      await upsertEvent(payload);
 
-      const dStr = dayjs(startIso).format('YYYY-MM-DD');
+      // === UI 更新 ===
+      // ・カレンダーの再描画キー
       setRefreshKey(v => v + 1);
+
+      // ・DayEventsSheet が開いている＆対象日ならリストを更新
+      const dStr = dayjs(startIso).format('YYYY-MM-DD');
       if (sheetVisible && sheetDate === dStr) {
-        setSheetItems((filterEventsByEntity(listInstancesByDate(dStr) ?? [])).slice(0, 50));
+        const next = filterEventsByEntity(listInstancesByDate(dStr) ?? []).slice(0, 50);
+        setSheetItems(next);
       }
 
+      // フォーム閉じる
+      setEditingItem(null);
       closeAddSheet();
+    } catch (e: any) {
+      console.warn('[saveEvent] upsert failed:', e);
+      Alert.alert('保存に失敗しました', String(e?.message ?? e ?? 'unknown error'));
     } finally {
       (CalendarScreen as any).__saving = false;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     formTitle, formSummary, formAllDay, startTime, endTime, startDate, endDate,
-    formColor, formCalId, tags, sheetVisible, sheetDate, filterEventsByEntity
+    formColor, formCalId, tags, sheetVisible, sheetDate, filterEventsByEntity,
+    isEditing, editingItem, formTz, formVisibility, FREQ
   ]);
+
+
 
   // ==== ここから UI ====
   return (
@@ -1589,11 +1667,16 @@ export default function CalendarScreen({ navigation }: Props) {
         onClose={closeSheet}
         onEndReached={onEndReached}
         rowHeight={64}
+        // ★ 追記：編集ボタン押下コールバック（DayEventsSheet 側未実装でも暫定で any）
+        {...({ onPressEdit: onPressEditFromSheet } as any)}
       />
 
       {/* 右下の FAB */}
       <Pressable
         onPress={() => {
+          // ★ 新規作成モードへ
+          setEditingItem(null);
+
           setFormTitle('');
           setFormSummary('');
           setFormAllDay(false);
@@ -1629,7 +1712,7 @@ export default function CalendarScreen({ navigation }: Props) {
         <Text style={{ color: theme.textPrimary, fontSize: 28, lineHeight: 28, marginTop: -2 }}>＋</Text>
       </Pressable>
 
-      {/* 追加フォーム（オーバーレイ） */}
+      {/* 追加/編集フォーム（オーバーレイ） */}
       {addVisible && (
         <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} pointerEvents="box-none">
           {/* 背景タップで閉じる */}
@@ -1656,7 +1739,7 @@ export default function CalendarScreen({ navigation }: Props) {
                 }}
               >
                 <Text style={{ fontSize: 16, fontWeight: '800', color: theme.textPrimary }}>
-                  イベントを追加
+                  {isEditing ? 'イベントを編集' : 'イベントを追加'}
                 </Text>
 
                 <Pressable
@@ -2252,8 +2335,7 @@ export default function CalendarScreen({ navigation }: Props) {
                         backgroundColor: '#FFFFFF',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        borderWidth: HAIR_SAFE,
-                        borderColor: theme.border,
+                        borderWidth: HAIR_SAFE, borderColor: theme.border,
                       }}
                       accessibilityLabel="白"
                     >
