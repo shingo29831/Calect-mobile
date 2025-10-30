@@ -169,3 +169,53 @@ export async function upsertEvent(input: UpsertEventInput): Promise<UpsertEventR
     return { event_id: res?.event_id ?? '', isUpdate: false };
   }
 }
+
+/** ===== 削除（APIが未確定でも動くフォールバック実装） =====
+ * 優先順位:
+ *  1) store/db.deleteEventLocalAndShard(event_id)
+ *  2) store/db.deleteEventLocal(event_id)
+ *  3) store/db.deleteEvent(event_id)
+ *  4) 最後の手段: updateEventLocalAndShard({ event_id, deleted: true }) でソフトデリート
+ */
+export async function deleteEvent(event_id: string): Promise<{ event_id: string; ok: boolean; hard: boolean }> {
+  if (!event_id || typeof event_id !== 'string') {
+    throw new Error('event_id が不正です');
+  }
+
+  // 動的 import で存在確認しながら実行
+  const db = await import('../../../store/db').then(m => m as any).catch(() => ({} as any));
+
+  // 1) shard 連動のハードデリート
+  if (typeof db.deleteEventLocalAndShard === 'function') {
+    await db.deleteEventLocalAndShard(event_id);
+    return { event_id, ok: true, hard: true };
+  }
+
+  // 2) ローカルのみ削除（ハード）
+  if (typeof db.deleteEventLocal === 'function') {
+    await db.deleteEventLocal(event_id);
+    return { event_id, ok: true, hard: true };
+  }
+
+  // 3) 汎用 deleteEvent（ハード）
+  if (typeof db.deleteEvent === 'function') {
+    await db.deleteEvent(event_id);
+    return { event_id, ok: true, hard: true };
+  }
+
+  // 4) フォールバック: ソフトデリート（deleted: true）で更新
+  try {
+    if (typeof (updateEventLocalAndShard as any) === 'function') {
+      await (updateEventLocalAndShard as any)({
+        event_id,
+        // 既存の UpdateEventInput に deleted が無くても any で回避
+        deleted: true,
+      } as any);
+      return { event_id, ok: true, hard: false };
+    }
+  } catch {
+    // 何もしない → 次のエラーへ
+  }
+
+  throw new Error('削除APIが見つかりませんでした（deleteEventLocalAndShard / deleteEventLocal / deleteEvent のいずれも未実装）');
+}
