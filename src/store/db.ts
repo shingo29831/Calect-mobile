@@ -3,6 +3,7 @@
 // ローカルDB + ローカル永続化（snapshot/instances.v1.json & ops/instances.ndjson）
 // - createEventLocal: 1件のイベント作成→ローカルDB反映＆永続化
 // - createEventLocalAndShard: ↑に加えて v2 月シャードへもライトスルー
+// - updateEventLocalAndShard: 既存イベントを同一 event_id で上書き（重複防止）
 // - replaceAllInstances: メモリDBを丸ごと差し替え
 // - listInstancesByDate: 日付での可視インスタンス抽出（ローカルTZ日境界）
 // - getAllTags: タグ一覧
@@ -13,10 +14,10 @@ import dayjs from '../lib/dayjs';
 import type { EventInstance, Event, ULID, HexColor } from '../api/types';
 import { startOfLocalDay, endOfLocalDay } from '../utils/time';
 
-// ★ 旧 localStore API は存在しないため、低レベルなファイルI/Oを直接利用
+// 低レベルなファイルI/O
 import { readFile, writeFile } from './localFile';
 
-// ★ v2 月シャード反映
+// v2 月シャード反映
 import { upsertEventV2 } from '../data/persistence/monthShard';
 
 // ====== 永続ファイル（インスタンス/タグ用・アプリ内専用）======
@@ -56,7 +57,6 @@ async function loadLocalSnapshot(): Promise<LocalSnapshot> {
     const tags = tagsSrc.map(String);
     return { instances, tags };
   } catch {
-    //読み込み失敗は空配列を返す
     return { instances: [], tags: [] };
   }
 }
@@ -69,11 +69,14 @@ async function saveLocalSnapshot(next: LocalSnapshot): Promise<void> {
   await writeFile(SNAPSHOT_INST_PATH, JSON.stringify(payload));
 }
 
+async function persistSnapshot(): Promise<void> {
+  await saveLocalSnapshot({ instances, tags: Array.from(tagsSet) });
+}
+
 async function appendOps(rows: any[]): Promise<void> {
   try {
     const now = new Date().toISOString();
     const lines = rows.map((r) => JSON.stringify({ ...r, _logged_at: now })).join('\n') + '\n';
-    // 追記APIが無いので、既存を読んで足す
     let prev = '';
     try { prev = await readFile(OPS_LOG_PATH); } catch { /* 初回 */ }
     await writeFile(OPS_LOG_PATH, prev + lines);
@@ -130,7 +133,7 @@ export function listInstancesByDate(dateISO: string): EventInstance[] {
   return out;
 }
 
-// ====== CreateEventInput======
+// ====== CreateEventInput / UpdateEventInput ======
 export type CreateEventInput = {
   calendar_id?: string;      // 既定: 'CAL_LOCAL_DEFAULT'
   title: string;
@@ -138,11 +141,10 @@ export type CreateEventInput = {
 
   rrule?: string; // RFC5545
   start_at: string; // "HH:mm"
-  end_at: string; // "HH:mm"
-  dtstart: string; // "YYYY-MM-DD""
-  dtend: string; // "YYYY-MM-DD"
+  end_at: string;   // "HH:mm"
+  dtstart: string;  // "YYYY-MM-DD"
+  dtend: string;    // "YYYY-MM-DD"
   tz?: string;
-  
 
   // UI向けプロパティ
   color?: HexColor;
@@ -152,12 +154,50 @@ export type CreateEventInput = {
   style?: {  };
 };
 
-// Event -> 単発の EventInstance（繰り返しは別途）
+export type UpdateEventInput = CreateEventInput & {
+  event_id: string; // 既存イベントIDを維持して上書き
+};
+
+// ====== ヘルパ：ローカル upsert / 削除 ======
+function makeOccurrenceKey(evId: string, dtstart: string) {
+  return `${evId}@@${dtstart}`;
+}
+
+function upsertLocal(next: EventInstance) {
+  const key = next.occurrence_key ?? makeOccurrenceKey(next.event_id, next.dtstart);
+  let replaced = false;
+  instances = instances.map((row) => {
+    const rowKey = row.occurrence_key ?? makeOccurrenceKey(row.event_id, row.dtstart);
+    if (rowKey === key) {
+      replaced = true;
+      return { ...row, ...next };
+    }
+    return row;
+  });
+  if (!replaced) instances = [...instances, next];
+
+  clearByDateCache();
+  emitDbChanged();
+}
+
+// タグの upsert（ローカル保存にも反映）
+async function upsertTagsToStore(newTags: string[]) {
+  if (!newTags?.length) return;
+  newTags.forEach((t) => {
+    const s = String(t).trim();
+    if (s) tagsSet.add(s);
+  });
+  try {
+    await persistSnapshot();
+  } catch {/* noop */}
+}
+
+// ====== Event -> 単発の EventInstance（繰り返しは別途） ======
 function eventToSingleInstance(ev: Event): EventInstance {
   return {
-    instance_id: Date.now(), // 一時的ユニークID（必要なら後で廃止可）
-    event_id: ev.event_id,        // 確定前は cid_ulid と同値
-    cid_ulid: (ev as any).cid_ulid ?? null,
+    instance_id: Date.now(), // 簡易一意
+    event_id: ev.event_id,
+    cid_ulid: (ev as any).cid_ulid ?? ev.event_id,
     calendar_id: ev.calendar_id,
     title: ev.title,
     summary: ev.summary ?? null,
@@ -165,26 +205,11 @@ function eventToSingleInstance(ev: Event): EventInstance {
     end_at: ev.end_at,
     dtstart: ev.dtstart,
     dtend: ev.dtend,
-    tags: ev.tags ?? [],
+    tags: (ev.tags as any) ?? [],
     color: ev.color,
     visibility: ev.visibility,
-    occurrence_key: `${ev.event_id}@@${ev.dtstart}`, // ユニーク判定用
+    occurrence_key: makeOccurrenceKey(ev.event_id, ev.dtstart),
   } as any;
-}
-
-// タグの upsert（ローカル保存にも反映）
-async function upsertTagsToStore(newTags: string[]) {
-  if (!newTags?.length) return;
-  
-  newTags.forEach((t) => {
-    const s = String(t).trim();
-    if (s) tagsSet.add(s);
-  });
-  try {
-    const current = await loadLocalSnapshot();
-    const nextTags = Array.from(tagsSet);
-    await saveLocalSnapshot({ ...current, tags: nextTags });
-  } catch {/* noop */}
 }
 
 // ====== 作成→ローカル保存（cid_ulid 付与） ======
@@ -205,42 +230,29 @@ export async function createEventLocal(input: CreateEventInput): Promise<EventIn
     end_at: input.end_at,
     dtstart: input.dtstart,
     dtend: input.dtend,
-    tz: 'local',
-    tags: input.tags ?? [],
+    tz: input.tz ?? 'local',
+    tags: (input.tags ?? []).map(String),
     color: input.color,
-    visibility: (input.visibility as any) ?? 'private',
+    visibility: (input.visibility as any) ?? 'Hidden',
     priority: input.priority ?? 'Normal',
-    
   };
 
   const inst = eventToSingleInstance(ev);
 
-  // メモリキャッシュ
-  instances = [...instances, inst];
-  clearByDateCache();
-  emitDbChanged();
+  // メモリ upsert
+  upsertLocal(inst);
 
   // タグ処理
-  const incomingTags = input.tags ?? [];
+  const incomingTags = (input.tags ?? []).map(String).filter(Boolean);
   if (incomingTags.length) upsertTagsToStore(incomingTags);
 
   // ローカル保存（スナップショット + ops 追記）
   (async () => {
     try {
-      const store = await loadLocalSnapshot();
-      const list = Array.isArray(store.instances) ? [...store.instances] : [];
-      const i = list.findIndex((r) => (r as any).instance_id === inst.instance_id);
-      if (i >= 0) list[i] = inst;
-      else list.push(inst);
-
-      const currentTags: string[] = Array.isArray(store.tags) ? store.tags : [];
-      const merged = new Set<string>(currentTags);
-      for (const t of incomingTags) { const s = String(t).trim(); if (s) merged.add(s); }
-
-      await saveLocalSnapshot({ instances: list, tags: Array.from(merged)});
-
-      // ops ログに冪等キー（cid_ulid）付きで残す
-      await appendOps([{ type: 'upsert', entity: 'instance', row: { ...inst, cid_ulid: cid }, updated_at: nowIso }]);
+      await persistSnapshot();
+      await appendOps([
+        { type: 'upsert', entity: 'instance', row: { ...inst, cid_ulid: cid }, updated_at: nowIso },
+      ]);
     } catch (e) {
       if (__DEV__) console.warn('[createEventLocal] persist failed:', e);
     }
@@ -250,28 +262,24 @@ export async function createEventLocal(input: CreateEventInput): Promise<EventIn
 }
 
 // ====== 追加：作成時に“v2 月シャードへもライトスルー” ======
-
-/**
- * 公開API：
- * “ローカル作成（従来）”に加えて、v2 月シャードへも即反映します。
- * 画面側は createEventLocal の代わりにこちらを呼んでください。
- */
 export async function createEventLocalAndShard(input: CreateEventInput): Promise<EventInstance> {
-  // ローカルDB
+  // まずローカルDB
   const inst = await createEventLocal(input);
 
   // v2イベント形式にして upsert（繰り返しなしの単発）
   try {
     const now = dayjs().toISOString();
-    const tags = (input.tags ?? []).map((t) => ({ tag_id: String(t) }));
+    const tagObjs = (input.tags ?? [])
+      .map(t => String(t).trim())
+      .filter(Boolean)
+      .map(tag_id => ({ tag_id }));
 
-    // monthShard の V2Event 仕様に合わせる（calendar_links / tags / updated_at など）
     await upsertEventV2({
       event_id: inst.event_id,
       title: input.title.trim(),
       summary: input.summary ?? '',
 
-      rrule: input.rrule ?? '',
+      rrule: input.rrule ?? 'NONE',
       start_at: input.start_at,
       end_at: input.end_at,
       dtstart: input.dtstart,
@@ -284,20 +292,17 @@ export async function createEventLocalAndShard(input: CreateEventInput): Promise
         {
           link_id: ulid(),
           calendar_id: (input.calendar_id ?? 'CAL_LOCAL_DEFAULT') as ULID,
-          content_visibility: input.visibility ?? 'private', // カレンダーのデフォルト設定にする必要あり：要対応
+          content_visibility: (input.visibility as any) ?? 'Hidden',
           created_by: 'me',
           updated_at: now,
           deleted_at: null,
         },
       ],
-      event_shares: [], // 共有対象を後で追記：要対応
-
+      event_shares: [],
       link_token: null,
-
       priority: input.priority ?? 'Normal',
-
       overrides: [],
-      tags:input.tags ? tags : [],
+      tags: tagObjs,                // ← {tag_id}[]
       created_by: 'me',
       updated_by: 'me',
       updated_at: now,
@@ -305,6 +310,99 @@ export async function createEventLocalAndShard(input: CreateEventInput): Promise
   } catch (e) {
     if (__DEV__) console.warn('[createEventLocalAndShard] v2 upsert failed:', e);
     // 月シャード反映に失敗しても、作成自体は成功として返す
+  }
+
+  return inst;
+}
+
+// ====== 追加：更新（同じ event_id で上書き。二重登録を防止） ======
+export async function updateEventLocalAndShard(input: UpdateEventInput): Promise<EventInstance> {
+  const nowIso = new Date().toISOString();
+
+  // 受け取り tags は string[] 想定
+  const tagIds = Array.from(
+    new Set((input.tags ?? []).map(t => String(t).trim()).filter(Boolean))
+  );
+
+  // ローカル側の置換対象 occurrence_key
+  const occKey = makeOccurrenceKey(input.event_id, input.dtstart);
+
+  // ローカル upsert 用インスタンス
+  const inst: EventInstance = {
+    instance_id: Date.now(),
+    event_id: input.event_id,
+    cid_ulid: input.event_id,
+    calendar_id: (input.calendar_id ?? 'CAL_LOCAL_DEFAULT') as ULID,
+    title: input.title.trim(),
+    summary: input.summary ?? null,
+    start_at: input.start_at,
+    end_at: input.end_at,
+    dtstart: input.dtstart,
+    dtend: input.dtend,
+    tags: tagIds,
+    color: input.color ?? undefined,
+    visibility: (input.visibility as any) ?? 'Hidden',
+    occurrence_key: occKey,
+  } as any;
+
+  // メモリ upsert（occurrence_key 一致で置換）
+  upsertLocal(inst);
+
+  // タグも保存
+  if (tagIds.length) await upsertTagsToStore(tagIds);
+
+  // スナップショット & ndjson
+  try {
+    await persistSnapshot();
+    await appendOps([
+      { type: 'upsert', entity: 'instance', row: inst, updated_at: nowIso },
+    ]);
+  } catch (e) {
+    if (__DEV__) console.warn('[updateEventLocalAndShard] persist failed:', e);
+  }
+
+  // 月シャード（V2）へも上書き
+  try {
+    const now = dayjs().toISOString();
+    const tagObjs = tagIds.map(tag_id => ({ tag_id }));
+
+    await upsertEventV2({
+      event_id: input.event_id,
+      title: input.title.trim(),
+      summary: input.summary ?? '',
+
+      rrule: input.rrule ?? 'NONE',
+      start_at: input.start_at,
+      end_at: input.end_at,
+      dtstart: input.dtstart,
+      dtend: input.dtend,
+      tz: input.tz ?? 'local',
+
+      color: input.color ?? null,
+
+      calendar_links: [
+        {
+          // 既存 link_id を厳密に維持できなくても UI 影響は軽微。
+          // 固定化したい場合は monthShard 側で既存を採番再利用。
+          link_id: `${input.event_id}-link`,
+          calendar_id: (input.calendar_id ?? 'CAL_LOCAL_DEFAULT') as ULID,
+          content_visibility: (input.visibility as any) ?? 'Hidden',
+          created_by: 'me',
+          updated_at: now,
+          deleted_at: null,
+        },
+      ],
+      event_shares: [],
+      link_token: null,
+      priority: input.priority ?? 'Normal',
+      overrides: [],
+      tags: tagObjs,               // ← {tag_id}[]
+      created_by: 'me',
+      updated_by: 'me',
+      updated_at: now,
+    } as any);
+  } catch (e) {
+    if (__DEV__) console.warn('[updateEventLocalAndShard] v2 upsert failed:', e);
   }
 
   return inst;

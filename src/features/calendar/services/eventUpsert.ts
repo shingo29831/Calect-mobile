@@ -2,13 +2,12 @@
 import dayjs from '../../../lib/dayjs';
 import type { EventVisibility } from 'src/api/types';
 
-// 既存 DB アダプタ（update が未実装でも安全に動くようにフォールバック）
+// DBアダプタ
 import {
   createEventLocalAndShard,
-  // 将来ここが実装されたら自動で使う
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  updateEventLocalAndShard as _updateMaybe,
+  updateEventLocalAndShard, // ← 追加（更新時はこちらを使う）
+  type CreateEventInput,
+  type UpdateEventInput,
 } from '../../../store/db';
 
 /** 画面→保存のための入力DTO */
@@ -29,7 +28,7 @@ export type UpsertEventInput = {
 
   tz?: string; // 'local' 等
 
-  // RRULE 文字列（未使用なら空文字）
+  // RRULE 文字列（未使用なら空文字 or 'NONE'）
   rrule?: string;
 
   // #RRGGBB または #RRGGBBAA（未指定可）
@@ -81,7 +80,7 @@ export function validateAndNormalize(input: UpsertEventInput): UpsertEventInput 
   const title = (input.title ?? '').trim();
   if (!title) throw new Error('タイトルは必須です');
 
-  const tz = input.tz || 'local';
+  const tz = (input.tz || 'local').trim();
 
   let st = input.allDay ? '00:00' : normHM(input.start_time || '');
   let et = input.allDay ? '23:59' : normHM(input.end_time || '');
@@ -94,6 +93,12 @@ export function validateAndNormalize(input: UpsertEventInput): UpsertEventInput 
   const color = input.color?.trim();
   const validColor = color && /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(color) ? color : undefined;
 
+  const tags = Array.from(
+    new Set((input.tags ?? []).map((t) => String(t).trim()).filter(Boolean))
+  );
+
+  const visibility = (input.visibility ?? 'Hidden') as EventVisibility;
+
   return {
     ...input,
     title,
@@ -103,46 +108,64 @@ export function validateAndNormalize(input: UpsertEventInput): UpsertEventInput 
     start_time: st,
     end_time: et,
     color: validColor,
-    rrule: input.rrule ?? '',
-    tags: input.tags ?? [],
-    visibility: input.visibility ?? 'Hidden',
+    rrule: (input.rrule ?? 'NONE').trim(),
+    tags,
+    visibility, // ← 型は EventVisibility
   };
 }
 
-/** ===== 保存（新規/更新を吸収） =====
- * DB 側に update があれば更新、なければ “とりあえず” 新規を使う（暫定）
- */
+/** ===== 保存（新規/更新を吸収） ===== */
 export async function upsertEvent(input: UpsertEventInput): Promise<UpsertEventResult> {
   const payload = validateAndNormalize(input);
 
-  const base = {
+  // Create/Update いずれでも使えるベース
+  const base: Omit<CreateEventInput, 'title' | 'start_at' | 'end_at' | 'dtstart' | 'dtend'> & {
+    title: string;
+    start_at: string;
+    end_at: string;
+    dtstart: string;
+    dtend: string;
+    visibility?: EventVisibility;
+    color?: string;
+    tags?: string[];
+    rrule?: string;
+    calendar_id: string;
+    tz?: string;
+  } = {
     calendar_id: payload.calendar_id,
     title: payload.title,
     summary: payload.summary?.trim() ?? '',
-
-    rrule: payload.rrule ?? '',
+    rrule: payload.rrule ?? 'NONE',
     start_at: payload.start_time,
     end_at: payload.end_time,
     dtstart: payload.start_date,
     dtend: payload.end_date,
     tz: payload.tz ?? 'local',
-
     color: payload.color,
     tags: payload.tags ?? [],
-    visibility: payload.visibility ?? 'Normal',
+    visibility: payload.visibility as EventVisibility, // ★ 型を固定
   };
 
-  // update が使えるなら更新、なければ create
-  const canUpdate = typeof _updateMaybe === 'function' && Boolean(payload.event_id);
+  const isUpdate = Boolean(payload.event_id);
 
-  if (canUpdate) {
-    const res = await _updateMaybe({
+  if (isUpdate) {
+    // UpdateEventInput を明示的に構成（visibility は EventVisibility）
+    const updatePayload: UpdateEventInput = {
       event_id: payload.event_id!,
       ...base,
-    });
+      visibility: (base.visibility ?? 'Hidden') as EventVisibility,
+    };
+
+    const res = await updateEventLocalAndShard(updatePayload);
     return { event_id: res?.event_id ?? payload.event_id!, isUpdate: true };
   } else {
-    const res = await createEventLocalAndShard(base as any);
+    // CreateEventInput を明示的に構成
+    const createPayload: CreateEventInput = {
+      ...base,
+      visibility: (base.visibility ?? 'Hidden') as EventVisibility,
+    };
+
+    const res = await createEventLocalAndShard(createPayload);
     return { event_id: res?.event_id ?? '', isUpdate: false };
   }
 }

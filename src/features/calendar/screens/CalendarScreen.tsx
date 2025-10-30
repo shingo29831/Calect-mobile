@@ -624,6 +624,21 @@ function extractAlpha01(hex: string) {
   return parseInt(aa, 16) / 255;
 }
 
+/* === ここから追記：編集対象イベントのID抽出ヘルパー === */
+function getEventIdFromRow(row: any): string | undefined {
+  if (!row) return undefined;
+  if (typeof row.event_id === 'string') return row.event_id;
+  if (typeof row.cid_ulid === 'string') return row.cid_ulid;
+  if (typeof row.eventId === 'string') return row.eventId;
+
+  const ok = String(row?.occurrence_key ?? row?.occurrenceKey ?? '');
+  const at = ok.indexOf('@@'); // "eventId@@YYYY-MM-DD" 形式対応
+  if (at > 0) return ok.slice(0, at);
+
+  return undefined;
+}
+/* === 追記ここまで === */
+
 /** === 追記：Alpha 連続バー === */
 const AlphaBar = ({
   width = 260,
@@ -986,6 +1001,7 @@ export default function CalendarScreen({ navigation }: Props) {
   // ★ 追加：編集モード状態
   const [editingItem, setEditingItem] = useState<any | null>(null);
   const isEditing = !!editingItem;
+  const [editingEventId, setEditingEventId] = useState<string | undefined>(undefined);
 
   // カラーピッカー内でドラッグ中はスクロールを止める
   const [draggingColor, setDraggingColor] = useState(false);
@@ -1406,6 +1422,8 @@ export default function CalendarScreen({ navigation }: Props) {
   const onPressEditFromSheet = useCallback((row: any) => {
     if (!row) return;
     setEditingItem(row);
+    const eid = getEventIdFromRow(row);
+    setEditingEventId(eid);
 
     // 基本情報
     setFormTitle(row?.title ?? '');
@@ -1484,13 +1502,13 @@ export default function CalendarScreen({ navigation }: Props) {
       const color = (formColor || '').trim();
       const validColor = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(color) ? color : undefined;
 
-      const eventIdForEdit =
-        editingItem?.event_id ?? editingItem?.cid_ulid ?? editingItem?.eventId ?? undefined;
+      // ★ ここでユーティリティを使用して編集対象の event_id を抽出
+      const eventIdForEdit = isEditing ? getEventIdFromRow(editingItem) : undefined;
 
       // === UpsertEventInput に合わせたペイロード ===
       const payload: UpsertEventInput = {
-        // 編集時のみ event_id を渡す（新規は undefined でOK）
-        event_id: isEditing ? eventIdForEdit : undefined,
+        // 編集時のみ event_id を渡す（新規は undefined）
+        event_id: isEditing ? (editingEventId ?? getEventIdFromRow(editingItem)) : undefined,
 
         calendar_id: formCalId,
         title: formTitle.trim(),
@@ -1502,9 +1520,9 @@ export default function CalendarScreen({ navigation }: Props) {
         start_time: st,         // HH:mm
         end_time:   endFixed,   // HH:mm
         allDay:    !!formAllDay,
-        tz:         formTz || 'local',
 
-        color: validColor,
+        tz:         formTz || 'local',
+        color:      validColor,
         tags,
         visibility: formVisibility ?? 'Normal',
       };
@@ -1676,6 +1694,7 @@ export default function CalendarScreen({ navigation }: Props) {
         onPress={() => {
           // ★ 新規作成モードへ
           setEditingItem(null);
+          setEditingEventId(undefined);
 
           setFormTitle('');
           setFormSummary('');
