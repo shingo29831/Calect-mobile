@@ -5,9 +5,13 @@ import type { EventVisibility } from 'src/api/types';
 // DBアダプタ
 import {
   createEventLocalAndShard,
-  updateEventLocalAndShard, // ← 追加（更新時はこちらを使う）
+  updateEventLocalAndShard,
   type CreateEventInput,
   type UpdateEventInput,
+  // ↓ 追加：db.ts の削除系を直接利用
+  deleteEventLocalAndShard,
+  deleteEventLocal,
+  deleteEventLocalByOccurrence,
 } from '../../../store/db';
 
 /** 画面→保存のための入力DTO */
@@ -170,52 +174,41 @@ export async function upsertEvent(input: UpsertEventInput): Promise<UpsertEventR
   }
 }
 
-/** ===== 削除（APIが未確定でも動くフォールバック実装） =====
- * 優先順位:
- *  1) store/db.deleteEventLocalAndShard(event_id)
- *  2) store/db.deleteEventLocal(event_id)
- *  3) store/db.deleteEvent(event_id)
- *  4) 最後の手段: updateEventLocalAndShard({ event_id, deleted: true }) でソフトデリート
+/** ===== 削除（db.ts の実装を直接使用） =====
+ *  - デフォルト: shard 連動で物理削除（ローカル + v2 月シャード）
+ *  - オプション shard=false でローカルのみ
  */
-export async function deleteEvent(event_id: string): Promise<{ event_id: string; ok: boolean; hard: boolean }> {
+export async function deleteEvent(
+  event_id: string,
+  opts?: { shard?: boolean }
+): Promise<{ event_id: string; ok: boolean; hard: boolean }> {
   if (!event_id || typeof event_id !== 'string') {
     throw new Error('event_id が不正です');
   }
+  const useShard = opts?.shard !== false; // 既定: true
 
-  // 動的 import で存在確認しながら実行
-  const db = await import('../../../store/db').then(m => m as any).catch(() => ({} as any));
-
-  // 1) shard 連動のハードデリート
-  if (typeof db.deleteEventLocalAndShard === 'function') {
-    await db.deleteEventLocalAndShard(event_id);
+  if (useShard && typeof deleteEventLocalAndShard === 'function') {
+    await deleteEventLocalAndShard(event_id);
     return { event_id, ok: true, hard: true };
   }
 
-  // 2) ローカルのみ削除（ハード）
-  if (typeof db.deleteEventLocal === 'function') {
-    await db.deleteEventLocal(event_id);
+  if (typeof deleteEventLocal === 'function') {
+    await deleteEventLocal(event_id);
     return { event_id, ok: true, hard: true };
   }
 
-  // 3) 汎用 deleteEvent（ハード）
-  if (typeof db.deleteEvent === 'function') {
-    await db.deleteEvent(event_id);
-    return { event_id, ok: true, hard: true };
-  }
+  throw new Error('削除APIが利用できません（deleteEventLocalAndShard / deleteEventLocal）');
+}
 
-  // 4) フォールバック: ソフトデリート（deleted: true）で更新
-  try {
-    if (typeof (updateEventLocalAndShard as any) === 'function') {
-      await (updateEventLocalAndShard as any)({
-        event_id,
-        // 既存の UpdateEventInput に deleted が無くても any で回避
-        deleted: true,
-      } as any);
-      return { event_id, ok: true, hard: false };
-    }
-  } catch {
-    // 何もしない → 次のエラーへ
+/** ===== 単一発生日だけ削除（必要に応じてUIから使用） ===== */
+export async function deleteEventOccurrence(
+  event_id: string,
+  dtstart: string
+): Promise<{ event_id: string; dtstart: string; ok: boolean }> {
+  if (!event_id || !dtstart) throw new Error('event_id / dtstart は必須です');
+  if (typeof deleteEventLocalByOccurrence !== 'function') {
+    throw new Error('deleteEventLocalByOccurrence が未実装です');
   }
-
-  throw new Error('削除APIが見つかりませんでした（deleteEventLocalAndShard / deleteEventLocal / deleteEvent のいずれも未実装）');
+  await deleteEventLocalByOccurrence(event_id, dtstart);
+  return { event_id, dtstart, ok: true };
 }

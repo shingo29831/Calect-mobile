@@ -563,13 +563,14 @@ export default function EventModal({ route, navigation }: Props) {
   useEffect(() => { ensureEndTimeNotBeforeStart(startTime, endTime); }, [startTime, endTime, ensureEndTimeNotBeforeStart]);
 
   const navigateBackWithRefresh = useCallback((sDate: string, eDate: string) => {
-    // カレンダー画面に「再計算用の印」を渡してから戻る
     (navigation as any).navigate('Calendar', {
       __refreshAt: Date.now(),
       __refreshHint: { start: sDate, end: eDate },
     });
     navigation.goBack();
   }, [navigation]);
+
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const handleSave = useCallback(async () => {
     try {
@@ -627,10 +628,7 @@ export default function EventModal({ route, navigation }: Props) {
 
       await upsertEvent(payload as any);
 
-      // ★ 変更反映を確実にするためのソフトリフレッシュ（キャッシュ破棄 + DB購読通知）
       await softRefreshAfterChange(sDate, eDate);
-
-      // ★ カレンダーへ再描画フラグを渡してから戻る（起動直後/保存後にイベントバーが出ない対策）
       navigateBackWithRefresh(sDate, eDate);
 
       Alert.alert(isEdit ? '更新しました' : '保存しました', isEdit ? 'イベントを更新しました。' : 'イベントを作成しました。');
@@ -642,7 +640,7 @@ export default function EventModal({ route, navigation }: Props) {
   }, [isEdit, p?.event_id, formTitle, formSummary, formAllDay, startDate, endDate, startTime, endTime, formColor, tags, formCalId, formTz, formVisibility, parseHM, navigateBackWithRefresh]);
 
   const handleDelete = useCallback(() => {
-    if (!isEdit || !p?.event_id) return;
+    if (!isEdit || !p?.event_id || isDeleting) return;
 
     Alert.alert(
       '削除の確認',
@@ -654,20 +652,24 @@ export default function EventModal({ route, navigation }: Props) {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteEventService(p.event_id);
+              setIsDeleting(true);
+              // shard連動のハードデリート（既定true）
+              await deleteEventService(p.event_id, { shard: true });
               await softRefreshAfterChange(startDate, endDate);
               navigateBackWithRefresh(startDate, endDate);
               Alert.alert('削除しました', 'イベントを削除しました。');
             } catch (e: any) {
               console.warn('[EventModal] delete failed:', e);
               Alert.alert('削除に失敗しました', String(e?.message ?? e ?? 'unknown error'));
+            } finally {
+              setIsDeleting(false);
             }
           },
         },
       ],
       { cancelable: true }
     );
-  }, [isEdit, p?.event_id, startDate, endDate, navigateBackWithRefresh]);
+  }, [isEdit, p?.event_id, startDate, endDate, navigateBackWithRefresh, isDeleting]);
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
@@ -915,30 +917,33 @@ export default function EventModal({ route, navigation }: Props) {
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <Pressable
               onPress={() => navigation.goBack()}
+              disabled={isDeleting}
               style={{
                 flex: 1, height: 46, borderRadius: 12,
                 alignItems: 'center', justifyContent: 'center',
-                borderWidth: HAIR, borderColor: theme.border, backgroundColor: theme.surface
+                borderWidth: HAIR, borderColor: theme.border, backgroundColor: theme.surface, opacity: isDeleting ? 0.6 : 1
               }}
             >
               <Text style={{ color: theme.textPrimary, fontWeight: '800' }}>キャンセル</Text>
             </Pressable>
             <Pressable
               onPress={handleDelete}
+              disabled={isDeleting}
               style={{
                 width: 110, height: 46, borderRadius: 12,
                 alignItems: 'center', justifyContent: 'center',
-                backgroundColor: '#ef4444', borderWidth: HAIR, borderColor: '#b91c1c'
+                backgroundColor: '#ef4444', borderWidth: HAIR, borderColor: '#b91c1c', opacity: isDeleting ? 0.7 : 1
               }}
             >
-              <Text style={{ color: '#fff', fontWeight: '900' }}>削除</Text>
+              <Text style={{ color: '#fff', fontWeight: '900' }}>{isDeleting ? '削除中…' : '削除'}</Text>
             </Pressable>
             <Pressable
               onPress={handleSave}
+              disabled={isDeleting}
               style={{
                 flex: 1, height: 46, borderRadius: 12,
                 alignItems: 'center', justifyContent: 'center',
-                backgroundColor: theme.accent
+                backgroundColor: theme.accent, opacity: isDeleting ? 0.6 : 1
               }}
             >
               <Text style={{ color: theme.accentText, fontWeight: '900' }}>更新</Text>

@@ -4,9 +4,12 @@
 // - createEventLocal: 1件のイベント作成→ローカルDB反映＆永続化
 // - createEventLocalAndShard: ↑に加えて v2 月シャードへもライトスルー
 // - updateEventLocalAndShard: 既存イベントを同一 event_id で上書き（重複防止）
+// - deleteEventLocal: event_id でまとめて削除（ローカル）
+// - deleteEventLocalAndShard: ↑に加えて v2 月シャードへも削除反映（ベストエフォート）
+// - deleteEventLocalByOccurrence: 単一発生日（occurrence）だけ削除（ローカル）
 // - replaceAllInstances: メモリDBを丸ごと差し替え
 // - listInstancesByDate: 日付での可視インスタンス抽出（ローカルTZ日境界）
-// - getAllTags: タグ一覧
+// - getAllTags: タグ一覧（※タグの掃除は安全のため自動では行わない）
 // - 購読イベント: subscribeDb / unsubscribeDb / emit
 // ===============================================
 
@@ -406,6 +409,118 @@ export async function updateEventLocalAndShard(input: UpdateEventInput): Promise
   }
 
   return inst;
+}
+
+// ====== 追加：削除（ローカル・全発生日まとめて） ======
+export async function deleteEventLocal(event_id: string): Promise<number> {
+  if (!event_id) return 0;
+
+  const before = instances.length;
+  const removed = instances.filter(r => r.event_id === event_id);
+  instances = instances.filter(r => r.event_id !== event_id);
+
+  clearByDateCache();
+  emitDbChanged();
+
+  const nowIso = new Date().toISOString();
+  try {
+    await persistSnapshot();
+    // まとめて1行の delete ログ（必要に応じて occurrence_key を添付）
+    await appendOps([
+      {
+        type: 'delete',
+        entity: 'instance',
+        where: { event_id, occurrence_keys: removed.map(r => r.occurrence_key ?? makeOccurrenceKey(r.event_id, r.dtstart)) },
+        deleted_at: nowIso,
+      },
+    ]);
+  } catch (e) {
+    if (__DEV__) console.warn('[deleteEventLocal] persist failed:', e);
+  }
+
+  return before - instances.length;
+}
+
+// ====== 追加：削除（ローカル・単一 occurrence を指定） ======
+export async function deleteEventLocalByOccurrence(event_id: string, dtstart: string): Promise<boolean> {
+  if (!event_id || !dtstart) return false;
+
+  const key = makeOccurrenceKey(event_id, dtstart);
+  const before = instances.length;
+  const target = instances.find(r => (r.occurrence_key ?? makeOccurrenceKey(r.event_id, r.dtstart)) === key);
+  if (!target) return false;
+
+  instances = instances.filter(r => (r.occurrence_key ?? makeOccurrenceKey(r.event_id, r.dtstart)) !== key);
+
+  clearByDateCache();
+  emitDbChanged();
+
+  const nowIso = new Date().toISOString();
+  try {
+    await persistSnapshot();
+    await appendOps([
+      {
+        type: 'delete',
+        entity: 'instance',
+        where: { event_id, occurrence_key: key },
+        deleted_at: nowIso,
+      },
+    ]);
+  } catch (e) {
+    if (__DEV__) console.warn('[deleteEventLocalByOccurrence] persist failed:', e);
+  }
+
+  return before !== instances.length;
+}
+
+// ====== 追加：削除（v2 月シャードにも反映：ベストエフォート） ======
+export async function deleteEventLocalAndShard(event_id: string): Promise<number> {
+  // まずローカルを確実に削除
+  const removedCount = await deleteEventLocal(event_id);
+
+  // 月シャード側：全リンクを「論理削除」扱いで upsert
+  // （※ monthShard 実装により物理削除 API があるならそちらを使ってOK）
+  if (removedCount > 0) {
+    try {
+      const now = dayjs().toISOString();
+      // 既知の情報が無いので最小限のイベント骨子で upsert → calendar_links.deleted_at を立てる
+      await upsertEventV2({
+        event_id,
+        title: '',
+        summary: '',
+        rrule: 'NONE',
+        start_at: '00:00',
+        end_at: '00:00',
+        dtstart: '1970-01-01',
+        dtend: '1970-01-01',
+        tz: 'local',
+        color: null,
+        calendar_links: [
+          {
+            link_id: `${event_id}-link`,
+            calendar_id: 'CAL_LOCAL_DEFAULT' as ULID,
+            content_visibility: 'Hidden',
+            created_by: 'me',
+            updated_at: now,
+            deleted_at: now, // ← 論理削除
+          },
+        ],
+        event_shares: [],
+        link_token: null,
+        priority: 'Normal',
+        overrides: [],
+        tags: [],
+        created_by: 'me',
+        updated_by: 'me',
+        updated_at: now,
+      } as any);
+    } catch (e) {
+      if (__DEV__) console.warn('[deleteEventLocalAndShard] v2 reflect failed:', e);
+      // v2 反映に失敗してもローカル削除は完了扱い
+    }
+  }
+
+  return removedCount;
 }
 
 // ====== スナップショット一括置換 ======
