@@ -112,6 +112,7 @@ function emitDbChanged() {
 }
 export function subscribeDb(cb: Listener) { listeners.add(cb); }
 export function unsubscribeDb(cb: Listener) { listeners.delete(cb); }
+export const emitInstancesChanged = () => emitDbChanged();
 
 // ====== 日別キャッシュ ======
 const byDateCache = new Map<string, EventInstance[]>();
